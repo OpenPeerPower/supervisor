@@ -1,0 +1,7 @@
+#!/usr/bin/with-contenv bashio
+# ==============================================================================
+# Start Service service
+# ==============================================================================
+export LD_PRELOAD="/usr/local/lib/libjemalloc.so.2"
+
+exec python3 -m supervisor
