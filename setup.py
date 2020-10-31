@@ -8,8 +8,8 @@ setup(
     version=SUPERVISOR_VERSION,
     license="BSD License",
     author="The Open Peer Power Authors",
-    author_email="hello@open-peer-power.io",
-    url="https://open-peer-power.io/",
+    author_email="hello@openpeerpower.io",
+    url="https://openpeerpower.io/",
     description=("Open-source private cloud os for Open-Peer-Power" " based on OppOS"),
     long_description=(
         "A maintainless private cloud operator system that"
@@ -27,7 +27,7 @@ setup(
         "Intended Audience :: Developers",
         "Programming Language :: Python :: 3.8",
     ],
-    keywords=["docker", "open-peer-power", "api"],
+    keywords=["docker", "openpeerpower", "api"],
     zip_safe=False,
     platforms="any",
     packages=[

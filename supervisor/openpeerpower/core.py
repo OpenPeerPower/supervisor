@@ -201,15 +201,15 @@ class HomeAssistantCore(CoreSysAttributes):
             )
 
             # Make a copy of the current log file if it exsist
-            logfile = self.sys_config.path_openpeerpower / "open-peer-power.log"
+            logfile = self.sys_config.path_openpeerpower / "openpeerpower.log"
             if logfile.exists():
                 backup = (
-                    self.sys_config.path_openpeerpower / "open-peer-power-rollback.log"
+                    self.sys_config.path_openpeerpower / "openpeerpower-rollback.log"
                 )
 
                 shutil.copy(logfile, backup)
                 _LOGGER.info(
-                    "A backup of the logfile is stored in /config/open-peer-power-rollback.log"
+                    "A backup of the logfile is stored in /config/openpeerpower-rollback.log"
                 )
             await _update(rollback)
         else:

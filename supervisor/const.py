@@ -5,12 +5,12 @@ from pathlib import Path
 
 SUPERVISOR_VERSION = "DEV"
 
-URL_OPPIO_ADDONS = "https://github.com/open-peer-power/oppio-addons"
-URL_OPPIO_APPARMOR = "https://version.open-peer-power.io/apparmor.txt"
-URL_OPPIO_VERSION = "https://version.open-peer-power.io/{channel}.json"
+URL_OPPIO_ADDONS = "https://github.com/openpeerpower/oppio-addons"
+URL_OPPIO_APPARMOR = "https://version.openpeerpower.io/apparmor.txt"
+URL_OPPIO_VERSION = "https://version.openpeerpower.io/{channel}.json"
 
 URL_OPPOS_OTA = (
-    "https://github.com/open-peer-power/operating-system/releases/download/"
+    "https://github.com/openpeerpower/operating-system/releases/download/"
     "{version}/oppos_{board}-{version}.raucb"
 )
 

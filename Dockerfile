@@ -25,7 +25,7 @@ COPY requirements.txt .
 RUN \
     export MAKEFLAGS="-j$(nproc)" \
     && pip3 install --no-cache-dir --no-index --only-binary=:all: --find-links \
-        "https://wheels.open-peer-power.io/alpine-$(cut -d '.' -f 1-2 < /etc/alpine-release)/${BUILD_ARCH}/" \
+        "https://wheels.openpeerpower.io/alpine-$(cut -d '.' -f 1-2 < /etc/alpine-release)/${BUILD_ARCH}/" \
         -r ./requirements.txt \
     && rm -f requirements.txt
 

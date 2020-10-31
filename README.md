@@ -10,13 +10,13 @@ network settings or installing and updating software.
 
 ## Installation
 
-Installation instructions can be found at https://open-peer-power.io/oppio.
+Installation instructions can be found at https://openpeerpower.io/oppio.
 
 ## Development
 
 The development of the Supervisor is not difficult but tricky.
 
-- You can use the builder to create your Supervisor: https://github.com/open-peer-power/oppio-builder
+- You can use the builder to create your Supervisor: https://github.com/openpeerpower/oppio-builder
 - Access a OppOS device or VM and pull your Supervisor.
 - Set the developer modus with the CLI tool: `ha supervisor options --channel=dev`
 - Tag it as `openpeerpower/xy-oppio-supervisor:latest`

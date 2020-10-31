@@ -1,6 +1,6 @@
 """Open Peer Power multicast plugin.
 
-Code: https://github.com/open-peer-power/plugin-multicast
+Code: https://github.com/openpeerpower/plugin-multicast
 """
 import asyncio
 from contextlib import suppress

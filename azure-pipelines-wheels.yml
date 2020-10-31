@@ -1,4 +1,4 @@
-# https://dev.azure.com/open-peer-power
+# https://dev.azure.com/openpeerpower
 
 trigger:
   batch: true
@@ -13,8 +13,8 @@ resources:
   repositories:
     - repository: azure
       type: github
-      name: "open-peer-power/ci-azure"
-      endpoint: "open-peer-power"
+      name: "openpeerpower/ci-azure"
+      endpoint: "openpeerpower"
 
 jobs:
   - template: templates/azp-job-wheels.yaml@azure

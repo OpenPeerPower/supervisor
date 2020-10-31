@@ -1,6 +1,6 @@
 """Open Peer Power cli plugin.
 
-Code: https://github.com/open-peer-power/plugin-cli
+Code: https://github.com/openpeerpower/plugin-cli
 """
 import asyncio
 from contextlib import suppress

@@ -1,6 +1,6 @@
 """Open Peer Power dns plugin.
 
-Code: https://github.com/open-peer-power/plugin-dns
+Code: https://github.com/openpeerpower/plugin-dns
 """
 import asyncio
 from contextlib import suppress
@@ -330,7 +330,7 @@ class CoreDNS(JsonConfig, CoreSysAttributes):
         )
         self.add_host(
             self.sys_docker.network.gateway,
-            ["openpeerpower", "open-peer-power"],
+            ["openpeerpower", "openpeerpower"],
             write=False,
         )
         self.add_host(self.sys_docker.network.dns, ["dns"], write=False)

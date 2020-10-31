@@ -1,4 +1,4 @@
-[submodule "open-peer-power-polymer"]
-	path = open-peer-power-polymer
-	url = https://github.com/open-peer-power/open-peer-power-polymer
+[submodule "openpeerpower-polymer"]
+	path = openpeerpower-polymer
+	url = https://github.com/openpeerpower/openpeerpower-polymer
 	branch = dev
