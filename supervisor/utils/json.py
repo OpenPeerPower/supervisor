@@ -18,9 +18,10 @@ def write_json_file(jsonfile: Path, data: Any) -> None:
     """Write a JSON file."""
     try:
         jsonfile.write_text(json.dumps(data, indent=2))
+        jsonfile.chmod(0o600)
     except (OSError, ValueError, TypeError) as err:
         _LOGGER.error("Can't write %s: %s", jsonfile, err)
-        raise JsonFileError() from None
+        raise JsonFileError() from err
 
 
 def read_json_file(jsonfile: Path) -> Any:
@@ -29,14 +30,14 @@ def read_json_file(jsonfile: Path) -> Any:
         return json.loads(jsonfile.read_text())
     except (OSError, ValueError, TypeError, UnicodeDecodeError) as err:
         _LOGGER.error("Can't read json from %s: %s", jsonfile, err)
-        raise JsonFileError() from None
+        raise JsonFileError() from err
 
 
 class JsonConfig:
-    """Hass core object for handle it."""
+    """Opp core object for handle it."""
 
     def __init__(self, json_file: Path, schema: vol.Schema):
-        """Initialize hass object."""
+        """Initialize opp object."""
         self._file: Path = json_file
         self._schema: vol.Schema = schema
         self._data: Dict[str, Any] = _DEFAULT
@@ -69,7 +70,7 @@ class JsonConfig:
             )
 
             # Reset data to default
-            _LOGGER.warning("Reset %s to default", self._file)
+            _LOGGER.warning("Resetting %s to default", self._file)
             self._data = self._schema(_DEFAULT)
 
     def save_data(self) -> None:
@@ -81,7 +82,7 @@ class JsonConfig:
             _LOGGER.error("Can't parse data: %s", humanize_error(self._data, ex))
 
             # Load last valid data
-            _LOGGER.warning("Reset %s to last version", self._file)
+            _LOGGER.warning("Resetting %s to last version", self._file)
             self._data = _DEFAULT
             self.read_data()
         else:

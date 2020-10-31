@@ -1,12 +1,12 @@
 {
     "local": {
         "name": "Local add-ons",
-        "url": "https://home-assistant.io/hassio",
+        "url": "https://open-peer-power.io/oppio",
         "maintainer": "you"
     },
     "core": {
         "name": "Official add-ons",
-        "url": "https://home-assistant.io/addons",
-        "maintainer": "Home Assistant"
+        "url": "https://open-peer-power.io/addons",
+        "maintainer": "Open Peer Power"
     }
 }

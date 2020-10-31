@@ -48,8 +48,8 @@ class APIIngress(CoreSysAttributes):
         return addon
 
     def _check_ha_access(self, request: web.Request) -> None:
-        if request[REQUEST_FROM] != self.sys_homeassistant:
-            _LOGGER.warning("Ingress is only available behind Home Assistant")
+        if request[REQUEST_FROM] != self.sys_openpeerpower:
+            _LOGGER.warning("Ingress is only available behind Open Peer Power")
             raise HTTPUnauthorized()
 
     def _create_url(self, addon: Addon, path: str) -> str:
@@ -104,7 +104,7 @@ class APIIngress(CoreSysAttributes):
         except aiohttp.ClientError as err:
             _LOGGER.error("Ingress error: %s", err)
 
-        raise HTTPBadGateway() from None
+        raise HTTPBadGateway()
 
     async def _handle_websocket(
         self, request: web.Request, addon: Addon, path: str
@@ -191,7 +191,11 @@ class APIIngress(CoreSysAttributes):
                 async for data in result.content.iter_chunked(4096):
                     await response.write(data)
 
-            except (aiohttp.ClientError, aiohttp.ClientPayloadError) as err:
+            except (
+                aiohttp.ClientError,
+                aiohttp.ClientPayloadError,
+                ConnectionResetError,
+            ) as err:
                 _LOGGER.error("Stream error with %s: %s", url, err)
 
             return response

@@ -12,14 +12,18 @@ from .auth import APIAuth
 from .cli import APICli
 from .discovery import APIDiscovery
 from .dns import APICoreDNS
+from .docker import APIDocker
 from .hardware import APIHardware
-from .homeassistant import APIHomeAssistant
+from .openpeerpower import APIHomeAssistant
 from .host import APIHost
 from .info import APIInfo
 from .ingress import APIIngress
 from .multicast import APIMulticast
+from .network import APINetwork
+from .observer import APIObserver
 from .os import APIOS
 from .proxy import APIProxy
+from .resolution import APIResoulution
 from .security import SecurityMiddleware
 from .services import APIServices
 from .snapshots import APISnapshots
@@ -40,7 +44,10 @@ class RestAPI(CoreSysAttributes):
         self.security: SecurityMiddleware = SecurityMiddleware(coresys)
         self.webapp: web.Application = web.Application(
             client_max_size=MAX_CLIENT_SIZE,
-            middlewares=[self.security.token_validation],
+            middlewares=[
+                self.security.system_validation,
+                self.security.token_validation,
+            ],
         )
 
         # service stuff
@@ -49,24 +56,30 @@ class RestAPI(CoreSysAttributes):
 
     async def load(self) -> None:
         """Register REST API Calls."""
-        self._register_supervisor()
-        self._register_host()
-        self._register_os()
-        self._register_cli()
-        self._register_multicast()
-        self._register_hardware()
-        self._register_homeassistant()
-        self._register_proxy()
-        self._register_panel()
         self._register_addons()
-        self._register_ingress()
-        self._register_snapshots()
-        self._register_discovery()
-        self._register_services()
-        self._register_info()
-        self._register_auth()
-        self._register_dns()
         self._register_audio()
+        self._register_auth()
+        self._register_cli()
+        self._register_discovery()
+        self._register_dns()
+        self._register_docker()
+        self._register_hardware()
+        self._register_openpeerpower()
+        self._register_host()
+        self._register_info()
+        self._register_ingress()
+        self._register_multicast()
+        self._register_network()
+        self._register_observer()
+        self._register_os()
+        self._register_panel()
+        self._register_proxy()
+        self._register_resolution()
+        self._register_services()
+        self._register_snapshots()
+        self._register_supervisor()
+
+        await self.start()
 
     def _register_host(self) -> None:
         """Register hostcontrol functions."""
@@ -86,6 +99,24 @@ class RestAPI(CoreSysAttributes):
                 web.post("/host/services/{service}/start", api_host.service_start),
                 web.post("/host/services/{service}/restart", api_host.service_restart),
                 web.post("/host/services/{service}/reload", api_host.service_reload),
+            ]
+        )
+
+    def _register_network(self) -> None:
+        """Register network functions."""
+        api_network = APINetwork()
+        api_network.coresys = self.coresys
+
+        self.webapp.add_routes(
+            [
+                web.get("/network/info", api_network.info),
+                web.get(
+                    "/network/interface/{interface}/info", api_network.interface_info
+                ),
+                web.post(
+                    "/network/interface/{interface}/update",
+                    api_network.interface_update,
+                ),
             ]
         )
 
@@ -112,6 +143,19 @@ class RestAPI(CoreSysAttributes):
                 web.get("/cli/info", api_cli.info),
                 web.get("/cli/stats", api_cli.stats),
                 web.post("/cli/update", api_cli.update),
+            ]
+        )
+
+    def _register_observer(self) -> None:
+        """Register Observer functions."""
+        api_observer = APIObserver()
+        api_observer.coresys = self.coresys
+
+        self.webapp.add_routes(
+            [
+                web.get("/observer/info", api_observer.info),
+                web.get("/observer/stats", api_observer.stats),
+                web.post("/observer/update", api_observer.update),
             ]
         )
 
@@ -150,13 +194,40 @@ class RestAPI(CoreSysAttributes):
 
         self.webapp.add_routes([web.get("/info", api_info.info)])
 
+    def _register_resolution(self) -> None:
+        """Register info functions."""
+        api_resolution = APIResoulution()
+        api_resolution.coresys = self.coresys
+
+        self.webapp.add_routes(
+            [
+                web.get("/resolution/info", api_resolution.info),
+                web.post(
+                    "/resolution/suggestion/{suggestion}",
+                    api_resolution.apply_suggestion,
+                ),
+                web.delete(
+                    "/resolution/suggestion/{suggestion}",
+                    api_resolution.dismiss_suggestion,
+                ),
+                web.delete(
+                    "/resolution/issue/{issue}",
+                    api_resolution.dismiss_issue,
+                ),
+            ]
+        )
+
     def _register_auth(self) -> None:
         """Register auth functions."""
         api_auth = APIAuth()
         api_auth.coresys = self.coresys
 
         self.webapp.add_routes(
-            [web.post("/auth", api_auth.auth), web.post("/auth/reset", api_auth.reset)]
+            [
+                web.post("/auth", api_auth.auth),
+                web.post("/auth/reset", api_auth.reset),
+                web.delete("/auth/cache", api_auth.cache),
+            ]
         )
 
     def _register_supervisor(self) -> None:
@@ -177,39 +248,39 @@ class RestAPI(CoreSysAttributes):
             ]
         )
 
-    def _register_homeassistant(self) -> None:
-        """Register Home Assistant functions."""
-        api_hass = APIHomeAssistant()
-        api_hass.coresys = self.coresys
+    def _register_openpeerpower(self) -> None:
+        """Register Open Peer Power functions."""
+        api_opp = APIHomeAssistant()
+        api_opp.coresys = self.coresys
 
         self.webapp.add_routes(
             [
-                web.get("/core/info", api_hass.info),
-                web.get("/core/logs", api_hass.logs),
-                web.get("/core/stats", api_hass.stats),
-                web.post("/core/options", api_hass.options),
-                web.post("/core/update", api_hass.update),
-                web.post("/core/restart", api_hass.restart),
-                web.post("/core/stop", api_hass.stop),
-                web.post("/core/start", api_hass.start),
-                web.post("/core/check", api_hass.check),
-                web.post("/core/rebuild", api_hass.rebuild),
+                web.get("/core/info", api_opp.info),
+                web.get("/core/logs", api_opp.logs),
+                web.get("/core/stats", api_opp.stats),
+                web.post("/core/options", api_opp.options),
+                web.post("/core/update", api_opp.update),
+                web.post("/core/restart", api_opp.restart),
+                web.post("/core/stop", api_opp.stop),
+                web.post("/core/start", api_opp.start),
+                web.post("/core/check", api_opp.check),
+                web.post("/core/rebuild", api_opp.rebuild),
                 # Remove with old Supervisor fallback
-                web.get("/homeassistant/info", api_hass.info),
-                web.get("/homeassistant/logs", api_hass.logs),
-                web.get("/homeassistant/stats", api_hass.stats),
-                web.post("/homeassistant/options", api_hass.options),
-                web.post("/homeassistant/update", api_hass.update),
-                web.post("/homeassistant/restart", api_hass.restart),
-                web.post("/homeassistant/stop", api_hass.stop),
-                web.post("/homeassistant/start", api_hass.start),
-                web.post("/homeassistant/check", api_hass.check),
-                web.post("/homeassistant/rebuild", api_hass.rebuild),
+                web.get("/openpeerpower/info", api_opp.info),
+                web.get("/openpeerpower/logs", api_opp.logs),
+                web.get("/openpeerpower/stats", api_opp.stats),
+                web.post("/openpeerpower/options", api_opp.options),
+                web.post("/openpeerpower/update", api_opp.update),
+                web.post("/openpeerpower/restart", api_opp.restart),
+                web.post("/openpeerpower/stop", api_opp.stop),
+                web.post("/openpeerpower/start", api_opp.start),
+                web.post("/openpeerpower/check", api_opp.check),
+                web.post("/openpeerpower/rebuild", api_opp.rebuild),
             ]
         )
 
     def _register_proxy(self) -> None:
-        """Register Home Assistant API Proxy."""
+        """Register Open Peer Power API Proxy."""
         api_proxy = APIProxy()
         api_proxy.coresys = self.coresys
 
@@ -222,12 +293,12 @@ class RestAPI(CoreSysAttributes):
                 web.get("/core/api/{path:.+}", api_proxy.api),
                 web.get("/core/api/", api_proxy.api),
                 # Remove with old Supervisor fallback
-                web.get("/homeassistant/api/websocket", api_proxy.websocket),
-                web.get("/homeassistant/websocket", api_proxy.websocket),
-                web.get("/homeassistant/api/stream", api_proxy.stream),
-                web.post("/homeassistant/api/{path:.+}", api_proxy.api),
-                web.get("/homeassistant/api/{path:.+}", api_proxy.api),
-                web.get("/homeassistant/api/", api_proxy.api),
+                web.get("/openpeerpower/api/websocket", api_proxy.websocket),
+                web.get("/openpeerpower/websocket", api_proxy.websocket),
+                web.get("/openpeerpower/api/stream", api_proxy.stream),
+                web.post("/openpeerpower/api/{path:.+}", api_proxy.api),
+                web.get("/openpeerpower/api/{path:.+}", api_proxy.api),
+                web.get("/openpeerpower/api/", api_proxy.api),
             ]
         )
 
@@ -248,6 +319,9 @@ class RestAPI(CoreSysAttributes):
                 web.post("/addons/{addon}/restart", api_addons.restart),
                 web.post("/addons/{addon}/update", api_addons.update),
                 web.post("/addons/{addon}/options", api_addons.options),
+                web.post(
+                    "/addons/{addon}/options/validate", api_addons.options_validate
+                ),
                 web.post("/addons/{addon}/rebuild", api_addons.rebuild),
                 web.get("/addons/{addon}/logs", api_addons.logs),
                 web.get("/addons/{addon}/icon", api_addons.icon),
@@ -286,7 +360,7 @@ class RestAPI(CoreSysAttributes):
                 web.post("/snapshots/new/partial", api_snapshots.snapshot_partial),
                 web.post("/snapshots/new/upload", api_snapshots.upload),
                 web.get("/snapshots/{snapshot}/info", api_snapshots.info),
-                web.post("/snapshots/{snapshot}/remove", api_snapshots.remove),
+                web.delete("/snapshots/{snapshot}", api_snapshots.remove),
                 web.post(
                     "/snapshots/{snapshot}/restore/full", api_snapshots.restore_full
                 ),
@@ -295,6 +369,8 @@ class RestAPI(CoreSysAttributes):
                     api_snapshots.restore_partial,
                 ),
                 web.get("/snapshots/{snapshot}/download", api_snapshots.download),
+                # Old, remove at end of 2020
+                web.post("/snapshots/{snapshot}/remove", api_snapshots.remove),
             ]
         )
 
@@ -366,9 +442,23 @@ class RestAPI(CoreSysAttributes):
         )
 
     def _register_panel(self) -> None:
-        """Register panel for Home Assistant."""
+        """Register panel for Open Peer Power."""
         panel_dir = Path(__file__).parent.joinpath("panel")
         self.webapp.add_routes([web.static("/app", panel_dir)])
+
+    def _register_docker(self) -> None:
+        """Register docker configuration functions."""
+        api_docker = APIDocker()
+        api_docker.coresys = self.coresys
+
+        self.webapp.add_routes(
+            [
+                web.get("/docker/info", api_docker.info),
+                web.get("/docker/registries", api_docker.registries),
+                web.post("/docker/registries", api_docker.create_registry),
+                web.delete("/docker/registries/{hostname}", api_docker.remove_registry),
+            ]
+        )
 
     async def start(self) -> None:
         """Run RESTful API webserver."""
@@ -382,7 +472,7 @@ class RestAPI(CoreSysAttributes):
         except OSError as err:
             _LOGGER.critical("Failed to create HTTP server at 0.0.0.0:80 -> %s", err)
         else:
-            _LOGGER.info("Start API on %s", self.sys_docker.network.supervisor)
+            _LOGGER.info("Starting API on %s", self.sys_docker.network.supervisor)
 
     async def stop(self) -> None:
         """Stop RESTful API webserver."""
@@ -393,4 +483,4 @@ class RestAPI(CoreSysAttributes):
         await self._site.stop()
         await self._runner.cleanup()
 
-        _LOGGER.info("Stop API on %s", self.sys_docker.network.supervisor)
+        _LOGGER.info("Stopping API on %s", self.sys_docker.network.supervisor)

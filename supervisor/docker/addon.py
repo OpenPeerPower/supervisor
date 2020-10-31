@@ -15,17 +15,18 @@ from ..addons.build import AddonBuild
 from ..const import (
     ENV_TIME,
     ENV_TOKEN,
-    ENV_TOKEN_OLD,
+    ENV_TOKEN_OPPIO,
     MAP_ADDONS,
     MAP_BACKUP,
     MAP_CONFIG,
+    MAP_MEDIA,
     MAP_SHARE,
     MAP_SSL,
     SECURITY_DISABLE,
     SECURITY_PROFILE,
 )
 from ..coresys import CoreSys
-from ..exceptions import DockerAPIError
+from ..exceptions import CoreDNSError, DockerError
 from ..utils import process_lock
 from .interface import DockerInterface
 
@@ -39,10 +40,10 @@ NO_ADDDRESS = ip_address("0.0.0.0")
 
 
 class DockerAddon(DockerInterface):
-    """Docker Supervisor wrapper for Home Assistant."""
+    """Docker Supervisor wrapper for Open Peer Power."""
 
     def __init__(self, coresys: CoreSys, addon: Addon):
-        """Initialize Docker Home Assistant wrapper."""
+        """Initialize Docker Open Peer Power wrapper."""
         super().__init__(coresys)
         self.addon = addon
 
@@ -60,7 +61,7 @@ class DockerAddon(DockerInterface):
         # Extract IP-Address
         try:
             return ip_address(
-                self._meta["NetworkSettings"]["Networks"]["hassio"]["IPAddress"]
+                self._meta["NetworkSettings"]["Networks"]["oppio"]["IPAddress"]
             )
         except (KeyError, TypeError, ValueError):
             return NO_ADDDRESS
@@ -116,9 +117,9 @@ class DockerAddon(DockerInterface):
 
         return {
             **addon_env,
-            ENV_TIME: self.sys_timezone,
+            ENV_TIME: self.sys_config.timezone,
             ENV_TOKEN: self.addon.supervisor_token,
-            ENV_TOKEN_OLD: self.addon.supervisor_token,
+            ENV_TOKEN_OPPIO: self.addon.supervisor_token,
         }
 
     @property
@@ -127,20 +128,21 @@ class DockerAddon(DockerInterface):
         devices = []
 
         # Extend add-on config
-        if self.addon.devices:
-            devices.extend(self.addon.devices)
+        for device in self.addon.devices:
+            if not Path(device.split(":")[0]).exists():
+                continue
+            devices.append(device)
 
         # Auto mapping UART devices
-        if self.addon.auto_uart:
-            if self.addon.with_udev:
-                serial_devs = self.sys_hardware.serial_devices
-            else:
-                serial_devs = (
-                    self.sys_hardware.serial_devices | self.sys_hardware.serial_by_id
-                )
-
-            for device in serial_devs:
-                devices.append(f"{device}:{device}:rwm")
+        if self.addon.with_uart:
+            for device in self.sys_hardware.serial_devices:
+                devices.append(f"{device.path.as_posix()}:{device.path.as_posix()}:rwm")
+                if self.addon.with_udev:
+                    continue
+                for device_link in device.links:
+                    devices.append(
+                        f"{device_link.as_posix()}:{device_link.as_posix()}:rwm"
+                    )
 
         # Use video devices
         if self.addon.with_video:
@@ -193,7 +195,7 @@ class DockerAddon(DockerInterface):
         """Return hosts mapping."""
         return {
             "supervisor": self.sys_docker.network.supervisor,
-            "hassio": self.sys_docker.network.supervisor,
+            "oppio": self.sys_docker.network.supervisor,
         }
 
     @property
@@ -221,7 +223,7 @@ class DockerAddon(DockerInterface):
         if MAP_CONFIG in addon_mapping:
             volumes.update(
                 {
-                    str(self.sys_config.path_extern_homeassistant): {
+                    str(self.sys_config.path_extern_openpeerpower): {
                         "bind": "/config",
                         "mode": addon_mapping[MAP_CONFIG],
                     }
@@ -268,6 +270,16 @@ class DockerAddon(DockerInterface):
                 }
             )
 
+        if MAP_MEDIA in addon_mapping:
+            volumes.update(
+                {
+                    str(self.sys_config.path_extern_media): {
+                        "bind": "/media",
+                        "mode": addon_mapping[MAP_MEDIA],
+                    }
+                }
+            )
+
         # Init other hardware mappings
 
         # GPIO support
@@ -285,6 +297,10 @@ class DockerAddon(DockerInterface):
                     }
                 }
             )
+
+        # USB support
+        if self.addon.with_usb and self.sys_hardware.usb_devices:
+            volumes.update({"/dev/bus/usb": {"bind": "/dev/bus/usb", "mode": "rw"}})
 
         # Kernel Modules support
         if self.addon.with_kernel_modules:
@@ -331,11 +347,10 @@ class DockerAddon(DockerInterface):
 
         # Security check
         if not self.addon.protected:
-            _LOGGER.warning("%s run with disabled protected mode!", self.addon.name)
+            _LOGGER.warning("%s running with disabled protected mode!", self.addon.name)
 
         # Cleanup
-        with suppress(DockerAPIError):
-            self._stop()
+        self._stop()
 
         # Create & Run container
         docker_container = self.sys_docker.run(
@@ -361,10 +376,18 @@ class DockerAddon(DockerInterface):
         )
 
         self._meta = docker_container.attrs
-        _LOGGER.info("Start Docker add-on %s with version %s", self.image, self.version)
+        _LOGGER.info(
+            "Starting Docker add-on %s with version %s", self.image, self.version
+        )
 
         # Write data to DNS server
-        self.sys_plugins.dns.add_host(ipv4=self.ip_address, names=[self.addon.hostname])
+        try:
+            self.sys_plugins.dns.add_host(
+                ipv4=self.ip_address, names=[self.addon.hostname]
+            )
+        except CoreDNSError as err:
+            _LOGGER.warning("Can't update DNS for %s", self.name)
+            self.sys_capture_exception(err)
 
     def _install(
         self, tag: str, image: Optional[str] = None, latest: bool = False
@@ -385,7 +408,7 @@ class DockerAddon(DockerInterface):
         """
         build_env = AddonBuild(self.coresys, self.addon)
 
-        _LOGGER.info("Start build %s:%s", self.image, tag)
+        _LOGGER.info("Starting build for %s:%s", self.image, tag)
         try:
             image, log = self.sys_docker.images.build(
                 use_config_proxy=False, **build_env.get_docker_args(tag)
@@ -396,9 +419,9 @@ class DockerAddon(DockerInterface):
             # Update meta data
             self._meta = image.attrs
 
-        except docker.errors.DockerException as err:
+        except (docker.errors.DockerException, requests.RequestException) as err:
             _LOGGER.error("Can't build %s:%s: %s", self.image, tag, err)
-            raise DockerAPIError() from None
+            raise DockerError() from err
 
         _LOGGER.info("Build %s:%s done", self.image, tag)
 
@@ -414,18 +437,18 @@ class DockerAddon(DockerInterface):
         """
         try:
             image = self.sys_docker.api.get_image(f"{self.image}:{self.version}")
-        except docker.errors.DockerException as err:
+        except (docker.errors.DockerException, requests.RequestException) as err:
             _LOGGER.error("Can't fetch image %s: %s", self.image, err)
-            raise DockerAPIError() from None
+            raise DockerError() from err
 
         _LOGGER.info("Export image %s to %s", self.image, tar_file)
         try:
             with tar_file.open("wb") as write_tar:
                 for chunk in image:
                     write_tar.write(chunk)
-        except (OSError, requests.exceptions.ReadTimeout) as err:
+        except (OSError, requests.RequestException) as err:
             _LOGGER.error("Can't write tar file %s: %s", tar_file, err)
-            raise DockerAPIError() from None
+            raise DockerError() from err
 
         _LOGGER.info("Export image %s done", self.image)
 
@@ -446,12 +469,12 @@ class DockerAddon(DockerInterface):
             docker_image = self.sys_docker.images.get(f"{self.image}:{self.version}")
         except (docker.errors.DockerException, OSError) as err:
             _LOGGER.error("Can't import image %s: %s", self.image, err)
-            raise DockerAPIError() from None
+            raise DockerError() from err
 
         self._meta = docker_image.attrs
-        _LOGGER.info("Import image %s and version %s", tar_file, self.version)
+        _LOGGER.info("Importing image %s and version %s", tar_file, self.version)
 
-        with suppress(DockerAPIError):
+        with suppress(DockerError):
             self._cleanup()
 
     @process_lock
@@ -465,15 +488,15 @@ class DockerAddon(DockerInterface):
         Need run inside executor.
         """
         if not self._is_running():
-            raise DockerAPIError() from None
+            raise DockerError()
 
         try:
             # Load needed docker objects
             container = self.sys_docker.containers.get(self.name)
             socket = container.attach_socket(params={"stdin": 1, "stream": 1})
-        except docker.errors.DockerException as err:
+        except (docker.errors.DockerException, requests.RequestException) as err:
             _LOGGER.error("Can't attach to %s stdin: %s", self.name, err)
-            raise DockerAPIError() from None
+            raise DockerError() from err
 
         try:
             # Write to stdin
@@ -482,7 +505,7 @@ class DockerAddon(DockerInterface):
             socket.close()
         except OSError as err:
             _LOGGER.error("Can't write to %s stdin: %s", self.name, err)
-            raise DockerAPIError() from None
+            raise DockerError() from err
 
     def _stop(self, remove_container=True) -> None:
         """Stop/remove Docker container.
@@ -490,5 +513,9 @@ class DockerAddon(DockerInterface):
         Need run inside executor.
         """
         if self.ip_address != NO_ADDDRESS:
-            self.sys_plugins.dns.delete_host(self.addon.hostname)
+            try:
+                self.sys_plugins.dns.delete_host(self.addon.hostname)
+            except CoreDNSError as err:
+                _LOGGER.warning("Can't update DNS for %s", self.name)
+                self.sys_capture_exception(err)
         super()._stop(remove_container)

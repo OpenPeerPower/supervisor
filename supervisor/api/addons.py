@@ -1,10 +1,11 @@
-"""Init file for Supervisor Home Assistant RESTful API."""
+"""Init file for Supervisor Open Peer Power RESTful API."""
 import asyncio
 import logging
 from typing import Any, Awaitable, Dict, List
 
 from aiohttp import web
 import voluptuous as vol
+from voluptuous.humanize import humanize_error
 
 from ..addons import AnyAddon
 from ..addons.addon import Addon
@@ -36,8 +37,8 @@ from ..const import (
     ATTR_DOCUMENTATION,
     ATTR_FULL_ACCESS,
     ATTR_GPIO,
-    ATTR_HASSIO_API,
-    ATTR_HASSIO_ROLE,
+    ATTR_OPPIO_API,
+    ATTR_OPPIO_ROLE,
     ATTR_HOMEASSISTANT,
     ATTR_HOMEASSISTANT_API,
     ATTR_HOST_DBUS,
@@ -61,6 +62,7 @@ from ..const import (
     ATTR_MEMORY_LIMIT,
     ATTR_MEMORY_PERCENT,
     ATTR_MEMORY_USAGE,
+    ATTR_MESSAGE,
     ATTR_NAME,
     ATTR_NETWORK,
     ATTR_NETWORK_DESCRIPTION,
@@ -77,26 +79,30 @@ from ..const import (
     ATTR_SLUG,
     ATTR_SOURCE,
     ATTR_STAGE,
+    ATTR_STARTUP,
     ATTR_STATE,
     ATTR_STDIN,
     ATTR_UDEV,
+    ATTR_UPDATE_AVAILABLE,
     ATTR_URL,
+    ATTR_USB,
+    ATTR_VALID,
     ATTR_VERSION,
     ATTR_VERSION_LATEST,
     ATTR_VIDEO,
+    ATTR_WATCHDOG,
     ATTR_WEBUI,
-    BOOT_AUTO,
-    BOOT_MANUAL,
     CONTENT_TYPE_BINARY,
     CONTENT_TYPE_PNG,
     CONTENT_TYPE_TEXT,
     REQUEST_FROM,
-    STATE_NONE,
+    AddonBoot,
+    AddonState,
 )
 from ..coresys import CoreSysAttributes
 from ..docker.stats import DockerStats
 from ..exceptions import APIError
-from ..validate import DOCKER_PORTS
+from ..validate import docker_ports
 from .utils import api_process, api_process_raw, api_validate
 
 _LOGGER: logging.Logger = logging.getLogger(__name__)
@@ -106,12 +112,13 @@ SCHEMA_VERSION = vol.Schema({vol.Optional(ATTR_VERSION): vol.Coerce(str)})
 # pylint: disable=no-value-for-parameter
 SCHEMA_OPTIONS = vol.Schema(
     {
-        vol.Optional(ATTR_BOOT): vol.In([BOOT_AUTO, BOOT_MANUAL]),
-        vol.Optional(ATTR_NETWORK): vol.Maybe(DOCKER_PORTS),
+        vol.Optional(ATTR_BOOT): vol.Coerce(AddonBoot),
+        vol.Optional(ATTR_NETWORK): vol.Maybe(docker_ports),
         vol.Optional(ATTR_AUTO_UPDATE): vol.Boolean(),
         vol.Optional(ATTR_AUDIO_OUTPUT): vol.Maybe(vol.Coerce(str)),
         vol.Optional(ATTR_AUDIO_INPUT): vol.Maybe(vol.Coerce(str)),
         vol.Optional(ATTR_INGRESS_PANEL): vol.Boolean(),
+        vol.Optional(ATTR_WATCHDOG): vol.Boolean(),
     }
 )
 
@@ -155,8 +162,12 @@ class APIAddons(CoreSysAttributes):
                 ATTR_DESCRIPTON: addon.description,
                 ATTR_ADVANCED: addon.advanced,
                 ATTR_STAGE: addon.stage,
-                ATTR_VERSION: addon.latest_version,
-                ATTR_INSTALLED: addon.version if addon.is_installed else None,
+                ATTR_VERSION: addon.version if addon.is_installed else None,
+                ATTR_VERSION_LATEST: addon.latest_version,
+                ATTR_UPDATE_AVAILABLE: addon.need_update
+                if addon.is_installed
+                else False,
+                ATTR_INSTALLED: addon.is_installed,
                 ATTR_AVAILABLE: addon.available,
                 ATTR_DETACHED: addon.is_detached,
                 ATTR_REPOSITORY: addon.repository,
@@ -203,6 +214,7 @@ class APIAddons(CoreSysAttributes):
             ATTR_REPOSITORY: addon.repository,
             ATTR_VERSION: None,
             ATTR_VERSION_LATEST: addon.latest_version,
+            ATTR_UPDATE_AVAILABLE: False,
             ATTR_PROTECTED: addon.protected,
             ATTR_RATING: rating_security(addon),
             ATTR_BOOT: addon.boot,
@@ -210,9 +222,9 @@ class APIAddons(CoreSysAttributes):
             ATTR_SCHEMA: addon.schema_ui,
             ATTR_ARCH: addon.supported_arch,
             ATTR_MACHINE: addon.supported_machine,
-            ATTR_HOMEASSISTANT: addon.homeassistant_version,
+            ATTR_HOMEASSISTANT: addon.openpeerpower_version,
             ATTR_URL: addon.url,
-            ATTR_STATE: STATE_NONE,
+            ATTR_STATE: AddonState.UNKNOWN,
             ATTR_DETACHED: addon.is_detached,
             ATTR_AVAILABLE: addon.available,
             ATTR_BUILD: addon.need_build,
@@ -232,11 +244,12 @@ class APIAddons(CoreSysAttributes):
             ATTR_DOCUMENTATION: addon.with_documentation,
             ATTR_STDIN: addon.with_stdin,
             ATTR_WEBUI: None,
-            ATTR_HASSIO_API: addon.access_hassio_api,
-            ATTR_HASSIO_ROLE: addon.hassio_role,
+            ATTR_OPPIO_API: addon.access_oppio_api,
+            ATTR_OPPIO_ROLE: addon.oppio_role,
             ATTR_AUTH_API: addon.access_auth_api,
-            ATTR_HOMEASSISTANT_API: addon.access_homeassistant_api,
+            ATTR_HOMEASSISTANT_API: addon.access_openpeerpower_api,
             ATTR_GPIO: addon.with_gpio,
+            ATTR_USB: addon.with_usb,
             ATTR_KERNEL_MODULES: addon.with_kernel_modules,
             ATTR_DEVICETREE: addon.with_devicetree,
             ATTR_UDEV: addon.with_udev,
@@ -245,6 +258,7 @@ class APIAddons(CoreSysAttributes):
             ATTR_AUDIO: addon.with_audio,
             ATTR_AUDIO_INPUT: None,
             ATTR_AUDIO_OUTPUT: None,
+            ATTR_STARTUP: addon.startup,
             ATTR_SERVICES: _pretty_services(addon),
             ATTR_DISCOVERY: addon.discovery,
             ATTR_IP_ADDRESS: None,
@@ -253,12 +267,13 @@ class APIAddons(CoreSysAttributes):
             ATTR_INGRESS_URL: None,
             ATTR_INGRESS_PORT: None,
             ATTR_INGRESS_PANEL: None,
+            ATTR_WATCHDOG: None,
         }
 
         if isinstance(addon, Addon) and addon.is_installed:
             data.update(
                 {
-                    ATTR_STATE: await addon.state(),
+                    ATTR_STATE: addon.state,
                     ATTR_WEBUI: addon.webui,
                     ATTR_INGRESS_ENTRY: addon.ingress_entry,
                     ATTR_INGRESS_URL: addon.ingress_url,
@@ -269,6 +284,8 @@ class APIAddons(CoreSysAttributes):
                     ATTR_AUTO_UPDATE: addon.auto_update,
                     ATTR_IP_ADDRESS: str(addon.ip_address),
                     ATTR_VERSION: addon.version,
+                    ATTR_UPDATE_AVAILABLE: addon.need_update,
+                    ATTR_WATCHDOG: addon.watchdog,
                 }
             )
 
@@ -280,7 +297,7 @@ class APIAddons(CoreSysAttributes):
         addon = self._extract_addon_installed(request)
 
         # Update secrets for validation
-        await self.sys_secrets.reload()
+        await self.sys_openpeerpower.secrets.reload()
 
         # Extend schema with add-on specific validation
         addon_schema = SCHEMA_OPTIONS.extend(
@@ -303,9 +320,24 @@ class APIAddons(CoreSysAttributes):
             addon.audio_output = body[ATTR_AUDIO_OUTPUT]
         if ATTR_INGRESS_PANEL in body:
             addon.ingress_panel = body[ATTR_INGRESS_PANEL]
-            await self.sys_ingress.update_hass_panel(addon)
+            await self.sys_ingress.update_opp_panel(addon)
+        if ATTR_WATCHDOG in body:
+            addon.watchdog = body[ATTR_WATCHDOG]
 
         addon.save_persist()
+
+    @api_process
+    async def options_validate(self, request: web.Request) -> None:
+        """Validate user options for add-on."""
+        addon = self._extract_addon_installed(request)
+        data = {ATTR_MESSAGE: "", ATTR_VALID: True}
+        try:
+            addon.schema(addon.options)
+        except vol.Invalid as ex:
+            data[ATTR_MESSAGE] = humanize_error(addon.options, ex)
+            data[ATTR_VALID] = False
+
+        return data
 
     @api_process
     async def security(self, request: web.Request) -> None:
@@ -314,7 +346,7 @@ class APIAddons(CoreSysAttributes):
         body: Dict[str, Any] = await api_validate(SCHEMA_SECURITY, request)
 
         if ATTR_PROTECTED in body:
-            _LOGGER.warning("Protected flag changing for %s!", addon.slug)
+            _LOGGER.warning("Changing protected flag for %s!", addon.slug)
             addon.protected = body[ATTR_PROTECTED]
 
         addon.save_persist()

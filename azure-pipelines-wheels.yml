@@ -1,26 +1,26 @@
-# https://dev.azure.com/home-assistant
+# https://dev.azure.com/open-peer-power
 
 trigger:
   batch: true
   branches:
     include:
-      - dev
+      - main
 pr: none
 variables:
   - name: versionWheels
-    value: '1.6.1-3.7-alpine3.11'
+    value: "1.13.0-3.8-alpine3.12"
 resources:
   repositories:
     - repository: azure
       type: github
-      name: 'home-assistant/ci-azure'
-      endpoint: 'home-assistant'
-
+      name: "open-peer-power/ci-azure"
+      endpoint: "open-peer-power"
 
 jobs:
-- template: templates/azp-job-wheels.yaml@azure
-  parameters:
-    builderVersion: '$(versionWheels)'
-    builderApk: 'build-base;libffi-dev;openssl-dev'
-    builderPip: 'Cython'
-    wheelsRequirement: 'requirements.txt'
+  - template: templates/azp-job-wheels.yaml@azure
+    parameters:
+      builderVersion: "$(versionWheels)"
+      builderApk: "build-base;libffi-dev;openssl-dev"
+      builderPip: "Cython"
+      skipBinary: "aiohttp"
+      wheelsRequirement: "requirements.txt"

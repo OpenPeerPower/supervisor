@@ -1,17 +1,15 @@
 """Audio docker object."""
-from contextlib import suppress
 import logging
 from pathlib import Path
 from typing import Dict
 
-from ..const import ENV_TIME
+from ..const import ENV_TIME, MACHINE_ID
 from ..coresys import CoreSysAttributes
-from ..exceptions import DockerAPIError
 from .interface import DockerInterface
 
 _LOGGER: logging.Logger = logging.getLogger(__name__)
 
-AUDIO_DOCKER_NAME: str = "hassio_audio"
+AUDIO_DOCKER_NAME: str = "oppio_audio"
 
 
 class DockerAudio(DockerInterface, CoreSysAttributes):
@@ -35,11 +33,15 @@ class DockerAudio(DockerInterface, CoreSysAttributes):
             "/run/dbus": {"bind": "/run/dbus", "mode": "ro"},
         }
 
+        # Machine ID
+        if MACHINE_ID.exists():
+            volumes.update({str(MACHINE_ID): {"bind": str(MACHINE_ID), "mode": "ro"}})
+
         # SND support
         if Path("/dev/snd").exists():
             volumes.update({"/dev/snd": {"bind": "/dev/snd", "mode": "rw"}})
         else:
-            _LOGGER.warning("Kernel have no audio support in")
+            _LOGGER.warning("Kernel have no audio support")
 
         return volumes
 
@@ -52,8 +54,7 @@ class DockerAudio(DockerInterface, CoreSysAttributes):
             return
 
         # Cleanup
-        with suppress(DockerAPIError):
-            self._stop()
+        self._stop()
 
         # Create & Run container
         docker_container = self.sys_docker.run(
@@ -65,13 +66,13 @@ class DockerAudio(DockerInterface, CoreSysAttributes):
             hostname=self.name.replace("_", "-"),
             detach=True,
             privileged=True,
-            environment={ENV_TIME: self.sys_timezone},
+            environment={ENV_TIME: self.sys_config.timezone},
             volumes=self.volumes,
         )
 
         self._meta = docker_container.attrs
         _LOGGER.info(
-            "Start Audio %s with version %s - %s",
+            "Starting Audio %s with version %s - %s",
             self.image,
             self.version,
             self.sys_docker.network.audio,

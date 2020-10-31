@@ -1,4 +1,4 @@
-"""HassOS support on supervisor."""
+"""OppOS support on supervisor."""
 import asyncio
 import logging
 from pathlib import Path
@@ -6,20 +6,21 @@ from typing import Awaitable, Optional
 
 import aiohttp
 from cpe import CPE
+from packaging.version import parse as pkg_parse
 
-from .const import URL_HASSOS_OTA
+from .const import URL_OPPOS_OTA
 from .coresys import CoreSys, CoreSysAttributes
 from .dbus.rauc import RaucState
-from .exceptions import DBusError, HassOSNotSupportedError, HassOSUpdateError
+from .exceptions import DBusError, OppOSNotSupportedError, OppOSUpdateError
 
 _LOGGER: logging.Logger = logging.getLogger(__name__)
 
 
-class HassOS(CoreSysAttributes):
-    """HassOS interface inside supervisor."""
+class OppOS(CoreSysAttributes):
+    """OppOS interface inside supervisor."""
 
     def __init__(self, coresys: CoreSys):
-        """Initialize HassOS handler."""
+        """Initialize OppOS handler."""
         self.coresys: CoreSys = coresys
         self._available: bool = False
         self._version: Optional[str] = None
@@ -27,23 +28,26 @@ class HassOS(CoreSysAttributes):
 
     @property
     def available(self) -> bool:
-        """Return True, if HassOS on host."""
+        """Return True, if OppOS on host."""
         return self._available
 
     @property
     def version(self) -> Optional[str]:
-        """Return version of HassOS."""
+        """Return version of OppOS."""
         return self._version
 
     @property
     def latest_version(self) -> str:
-        """Return version of HassOS."""
-        return self.sys_updater.version_hassos
+        """Return version of OppOS."""
+        return self.sys_updater.version_oppos
 
     @property
     def need_update(self) -> bool:
-        """Return true if a HassOS update is available."""
-        return self.version != self.latest_version
+        """Return true if a OppOS update is available."""
+        try:
+            return pkg_parse(self.version) < pkg_parse(self.latest_version)
+        except (TypeError, ValueError):
+            return True
 
     @property
     def board(self) -> Optional[str]:
@@ -51,22 +55,22 @@ class HassOS(CoreSysAttributes):
         return self._board
 
     def _check_host(self) -> None:
-        """Check if HassOS is available."""
+        """Check if OppOS is available."""
         if not self.available:
-            _LOGGER.error("No HassOS available")
-            raise HassOSNotSupportedError()
+            _LOGGER.error("No Open Peer Power Operating System available")
+            raise OppOSNotSupportedError()
 
     async def _download_raucb(self, version: str) -> Path:
         """Download rauc bundle (OTA) from github."""
-        url = URL_HASSOS_OTA.format(version=version, board=self.board)
-        raucb = Path(self.sys_config.path_tmp, f"hassos-{version}.raucb")
+        url = URL_OPPOS_OTA.format(version=version, board=self.board)
+        raucb = Path(self.sys_config.path_tmp, f"oppos-{version}.raucb")
 
         _LOGGER.info("Fetch OTA update from %s", url)
         try:
             timeout = aiohttp.ClientTimeout(total=600)
             async with self.sys_websession.get(url, timeout=timeout) as request:
                 if request.status != 200:
-                    raise HassOSUpdateError()
+                    raise OppOSUpdateError()
 
                 # Download RAUCB file
                 with raucb.open("wb") as ota_file:
@@ -85,19 +89,19 @@ class HassOS(CoreSysAttributes):
         except OSError as err:
             _LOGGER.error("Can't write OTA file: %s", err)
 
-        raise HassOSUpdateError()
+        raise OppOSUpdateError()
 
     async def load(self) -> None:
-        """Load HassOS data."""
+        """Load OppOS data."""
         try:
             if not self.sys_host.info.cpe:
                 raise NotImplementedError()
 
             cpe = CPE(self.sys_host.info.cpe)
-            if cpe.get_product()[0] != "hassos":
+            if cpe.get_product()[0] != "oppos":
                 raise NotImplementedError()
         except NotImplementedError:
-            _LOGGER.warning("No Home Assistant Operating System found!")
+            _LOGGER.info("No Open Peer Power Operating System found")
             return
         else:
             self._available = True
@@ -109,7 +113,7 @@ class HassOS(CoreSysAttributes):
         await self.sys_dbus.rauc.update()
 
         _LOGGER.info(
-            "Detect HassOS %s / BootSlot %s", self.version, self.sys_dbus.rauc.boot_slot
+            "Detect OppOS %s / BootSlot %s", self.version, self.sys_dbus.rauc.boot_slot
         )
 
     def config_sync(self) -> Awaitable[None]:
@@ -119,18 +123,20 @@ class HassOS(CoreSysAttributes):
         """
         self._check_host()
 
-        _LOGGER.info("Syncing configuration from USB with HassOS.")
-        return self.sys_host.services.restart("hassos-config.service")
+        _LOGGER.info(
+            "Synchronizing configuration from USB with Open Peer Power Operating System."
+        )
+        return self.sys_host.services.restart("oppos-config.service")
 
     async def update(self, version: Optional[str] = None) -> None:
-        """Update HassOS system."""
+        """Update OppOS system."""
         version = version or self.latest_version
 
         # Check installed version
         self._check_host()
         if version == self.version:
             _LOGGER.warning("Version %s is already installed", version)
-            raise HassOSUpdateError()
+            raise OppOSUpdateError()
 
         # Fetch files from internet
         int_ota = await self._download_raucb(version)
@@ -140,23 +146,28 @@ class HassOS(CoreSysAttributes):
             await self.sys_dbus.rauc.install(ext_ota)
             completed = await self.sys_dbus.rauc.signal_completed()
 
-        except DBusError:
+        except DBusError as err:
             _LOGGER.error("Rauc communication error")
-            raise HassOSUpdateError() from None
+            raise OppOSUpdateError() from err
 
         finally:
             int_ota.unlink()
 
         # Update success
         if 0 in completed:
-            _LOGGER.info("Install HassOS %s success", version)
+            _LOGGER.info(
+                "Install of Open Peer Power Operating System %s success", version
+            )
             self.sys_create_task(self.sys_host.control.reboot())
             return
 
-        # Update fails
+        # Update failed
         await self.sys_dbus.rauc.update()
-        _LOGGER.error("HassOS update fails with: %s", self.sys_dbus.rauc.last_error)
-        raise HassOSUpdateError()
+        _LOGGER.error(
+            "Open Peer Power Operating System update failed with: %s",
+            self.sys_dbus.rauc.last_error,
+        )
+        raise OppOSUpdateError()
 
     async def mark_healthy(self) -> None:
         """Set booted partition as good for rauc."""

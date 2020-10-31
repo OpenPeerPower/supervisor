@@ -2,8 +2,9 @@
 import asyncio
 import logging
 from pathlib import Path
+from typing import Set
 
-from ..const import FOLDER_HOMEASSISTANT, SNAPSHOT_FULL, SNAPSHOT_PARTIAL, CoreStates
+from ..const import FOLDER_HOMEASSISTANT, SNAPSHOT_FULL, SNAPSHOT_PARTIAL, CoreState
 from ..coresys import CoreSysAttributes
 from ..exceptions import AddonsError
 from ..utils.dt import utcnow
@@ -23,7 +24,7 @@ class SnapshotManager(CoreSysAttributes):
         self.lock = asyncio.Lock()
 
     @property
-    def list_snapshots(self):
+    def list_snapshots(self) -> Set[Snapshot]:
         """Return a list of all snapshot object."""
         return set(self.snapshots_obj.values())
 
@@ -42,8 +43,9 @@ class SnapshotManager(CoreSysAttributes):
         snapshot.new(slug, name, date_str, sys_type, password)
 
         # set general data
-        snapshot.store_homeassistant()
+        snapshot.store_openpeerpower()
         snapshot.store_repositories()
+        snapshot.store_dockerconfig()
 
         return snapshot
 
@@ -96,8 +98,10 @@ class SnapshotManager(CoreSysAttributes):
 
         # Already exists?
         if snapshot.slug in self.snapshots_obj:
-            _LOGGER.error("Snapshot %s already exists!", snapshot.slug)
-            return None
+            _LOGGER.warning(
+                "Snapshot %s already exists! overwriting snapshot", snapshot.slug
+            )
+            self.remove(self.get(snapshot.slug))
 
         # Move snapshot to backup
         tar_origin = Path(self.sys_config.path_backup, f"{snapshot.slug}.tar")
@@ -112,7 +116,7 @@ class SnapshotManager(CoreSysAttributes):
         snapshot = Snapshot(self.coresys, tar_origin)
         if not await snapshot.load():
             return None
-        _LOGGER.info("Success import %s", snapshot.slug)
+        _LOGGER.info("Successfully imported %s", snapshot.slug)
 
         self.snapshots_obj[snapshot.slug] = snapshot
         return snapshot
@@ -124,31 +128,32 @@ class SnapshotManager(CoreSysAttributes):
             return None
 
         snapshot = self._create_snapshot(name, SNAPSHOT_FULL, password)
-        _LOGGER.info("Full-Snapshot %s start", snapshot.slug)
+        _LOGGER.info("Creating new full-snapshot with slug %s", snapshot.slug)
         try:
-            self.sys_core.state = CoreStates.FREEZE
+            self.sys_core.state = CoreState.FREEZE
             await self.lock.acquire()
 
             async with snapshot:
                 # Snapshot add-ons
-                _LOGGER.info("Snapshot %s store Add-ons", snapshot.slug)
+                _LOGGER.info("Snapshotting %s store Add-ons", snapshot.slug)
                 await snapshot.store_addons()
 
                 # Snapshot folders
-                _LOGGER.info("Snapshot %s store folders", snapshot.slug)
+                _LOGGER.info("Snapshotting %s store folders", snapshot.slug)
                 await snapshot.store_folders()
 
-        except Exception:  # pylint: disable=broad-except
+        except Exception as excep:  # pylint: disable=broad-except
             _LOGGER.exception("Snapshot %s error", snapshot.slug)
+            print(excep)
             return None
 
         else:
-            _LOGGER.info("Full-Snapshot %s done", snapshot.slug)
+            _LOGGER.info("Crating full-snapshot with slug %s completed", snapshot.slug)
             self.snapshots_obj[snapshot.slug] = snapshot
             return snapshot
 
         finally:
-            self.sys_core.state = CoreStates.RUNNING
+            self.sys_core.state = CoreState.RUNNING
             self.lock.release()
 
     async def do_snapshot_partial(
@@ -163,9 +168,9 @@ class SnapshotManager(CoreSysAttributes):
         folders = folders or []
         snapshot = self._create_snapshot(name, SNAPSHOT_PARTIAL, password)
 
-        _LOGGER.info("Partial-Snapshot %s start", snapshot.slug)
+        _LOGGER.info("Creating new partial-snapshot with slug %s", snapshot.slug)
         try:
-            self.sys_core.state = CoreStates.FREEZE
+            self.sys_core.state = CoreState.FREEZE
             await self.lock.acquire()
 
             async with snapshot:
@@ -179,12 +184,12 @@ class SnapshotManager(CoreSysAttributes):
                     _LOGGER.warning("Add-on %s not found/installed", addon_slug)
 
                 if addon_list:
-                    _LOGGER.info("Snapshot %s store Add-ons", snapshot.slug)
+                    _LOGGER.info("Snapshotting %s store Add-ons", snapshot.slug)
                     await snapshot.store_addons(addon_list)
 
                 # Snapshot folders
                 if folders:
-                    _LOGGER.info("Snapshot %s store folders", snapshot.slug)
+                    _LOGGER.info("Snapshotting %s store folders", snapshot.slug)
                     await snapshot.store_folders(folders)
 
         except Exception:  # pylint: disable=broad-except
@@ -192,12 +197,14 @@ class SnapshotManager(CoreSysAttributes):
             return None
 
         else:
-            _LOGGER.info("Partial-Snapshot %s done", snapshot.slug)
+            _LOGGER.info(
+                "Crating partial-snapshot with slug %s completed", snapshot.slug
+            )
             self.snapshots_obj[snapshot.slug] = snapshot
             return snapshot
 
         finally:
-            self.sys_core.state = CoreStates.RUNNING
+            self.sys_core.state = CoreState.RUNNING
             self.lock.release()
 
     async def do_restore_full(self, snapshot, password=None):
@@ -207,7 +214,7 @@ class SnapshotManager(CoreSysAttributes):
             return False
 
         if snapshot.sys_type != SNAPSHOT_FULL:
-            _LOGGER.error("Restore %s is only a partial snapshot!", snapshot.slug)
+            _LOGGER.error("%s is only a partial snapshot!", snapshot.slug)
             return False
 
         if snapshot.protected and not snapshot.set_password(password):
@@ -216,30 +223,34 @@ class SnapshotManager(CoreSysAttributes):
 
         _LOGGER.info("Full-Restore %s start", snapshot.slug)
         try:
-            self.sys_core.state = CoreStates.FREEZE
+            self.sys_core.state = CoreState.FREEZE
             await self.lock.acquire()
 
             async with snapshot:
-                # Stop Home-Assistant / Add-ons
+                # Stop Open-Peer-Power / Add-ons
                 await self.sys_core.shutdown()
 
                 # Restore folders
-                _LOGGER.info("Restore %s run folders", snapshot.slug)
+                _LOGGER.info("Restoring %s folders", snapshot.slug)
                 await snapshot.restore_folders()
 
-                # Start homeassistant restore
-                _LOGGER.info("Restore %s run Home-Assistant", snapshot.slug)
-                snapshot.restore_homeassistant()
-                task_hass = self.sys_create_task(
-                    self.sys_homeassistant.update(snapshot.homeassistant_version)
+                # Restore docker config
+                _LOGGER.info("Restoring %s Docker Config", snapshot.slug)
+                snapshot.restore_dockerconfig()
+
+                # Start openpeerpower restore
+                _LOGGER.info("Restoring %s Open-Peer-Power", snapshot.slug)
+                snapshot.restore_openpeerpower()
+                task_opp = self.sys_create_task(
+                    self.sys_openpeerpower.core.update(snapshot.openpeerpower_version)
                 )
 
                 # Restore repositories
-                _LOGGER.info("Restore %s run Repositories", snapshot.slug)
+                _LOGGER.info("Restoring %s Repositories", snapshot.slug)
                 await snapshot.restore_repositories()
 
                 # Delete delta add-ons
-                _LOGGER.info("Restore %s remove add-ons", snapshot.slug)
+                _LOGGER.info("Removing add-ons not in the snapshot %s", snapshot.slug)
                 for addon in self.sys_addons.installed:
                     if addon.slug in snapshot.addon_list:
                         continue
@@ -255,10 +266,10 @@ class SnapshotManager(CoreSysAttributes):
                 _LOGGER.info("Restore %s old add-ons", snapshot.slug)
                 await snapshot.restore_addons()
 
-                # finish homeassistant task
-                _LOGGER.info("Restore %s wait until homeassistant ready", snapshot.slug)
-                await task_hass
-                await self.sys_homeassistant.start()
+                # finish openpeerpower task
+                _LOGGER.info("Restore %s wait until openpeerpower ready", snapshot.slug)
+                await task_opp
+                await self.sys_openpeerpower.core.start()
 
         except Exception:  # pylint: disable=broad-except
             _LOGGER.exception("Restore %s error", snapshot.slug)
@@ -269,11 +280,11 @@ class SnapshotManager(CoreSysAttributes):
             return True
 
         finally:
-            self.sys_core.state = CoreStates.RUNNING
+            self.sys_core.state = CoreState.RUNNING
             self.lock.release()
 
     async def do_restore_partial(
-        self, snapshot, homeassistant=False, addons=None, folders=None, password=None
+        self, snapshot, openpeerpower=False, addons=None, folders=None, password=None
     ):
         """Restore a snapshot."""
         if self.lock.locked():
@@ -289,48 +300,54 @@ class SnapshotManager(CoreSysAttributes):
 
         _LOGGER.info("Partial-Restore %s start", snapshot.slug)
         try:
-            self.sys_core.state = CoreStates.FREEZE
+            self.sys_core.state = CoreState.FREEZE
             await self.lock.acquire()
 
             async with snapshot:
-                # Stop Home-Assistant for config restore
+                # Restore docker config
+                _LOGGER.info("Restoring %s Docker Config", snapshot.slug)
+                snapshot.restore_dockerconfig()
+
+                # Stop Open-Peer-Power for config restore
                 if FOLDER_HOMEASSISTANT in folders:
-                    await self.sys_homeassistant.stop()
-                    snapshot.restore_homeassistant()
+                    await self.sys_openpeerpower.core.stop()
+                    snapshot.restore_openpeerpower()
 
                 # Process folders
                 if folders:
-                    _LOGGER.info("Restore %s run folders", snapshot.slug)
+                    _LOGGER.info("Restoring %s folders", snapshot.slug)
                     await snapshot.restore_folders(folders)
 
-                # Process Home-Assistant
-                task_hass = None
-                if homeassistant:
-                    _LOGGER.info("Restore %s run Home-Assistant", snapshot.slug)
-                    task_hass = self.sys_create_task(
-                        self.sys_homeassistant.update(snapshot.homeassistant_version)
+                # Process Open-Peer-Power
+                task_opp = None
+                if openpeerpower:
+                    _LOGGER.info("Restoring %s Open-Peer-Power", snapshot.slug)
+                    task_opp = self.sys_create_task(
+                        self.sys_openpeerpower.core.update(
+                            snapshot.openpeerpower_version
+                        )
                     )
 
                 if addons:
-                    _LOGGER.info("Restore %s run Repositories", snapshot.slug)
+                    _LOGGER.info("Restoring %s Repositories", snapshot.slug)
                     await snapshot.restore_repositories()
 
-                    _LOGGER.info("Restore %s old add-ons", snapshot.slug)
+                    _LOGGER.info("Restoring %s old add-ons", snapshot.slug)
                     await snapshot.restore_addons(addons)
 
-                # Make sure homeassistant run agen
-                if task_hass:
-                    _LOGGER.info("Restore %s wait for Home-Assistant", snapshot.slug)
-                    await task_hass
+                # Make sure openpeerpower run agen
+                if task_opp:
+                    _LOGGER.info("Restore %s wait for Open-Peer-Power", snapshot.slug)
+                    await task_opp
 
                 # Do we need start HomeAssistant?
-                if not await self.sys_homeassistant.is_running():
-                    await self.sys_homeassistant.start()
+                if not await self.sys_openpeerpower.core.is_running():
+                    await self.sys_openpeerpower.core.start()
 
                 # Check If we can access to API / otherwise restart
-                if not await self.sys_homeassistant.check_api_state():
+                if not await self.sys_openpeerpower.api.check_api_state():
                     _LOGGER.warning("Need restart HomeAssistant for API")
-                    await self.sys_homeassistant.restart()
+                    await self.sys_openpeerpower.core.restart()
 
         except Exception:  # pylint: disable=broad-except
             _LOGGER.exception("Restore %s error", snapshot.slug)
@@ -341,5 +358,5 @@ class SnapshotManager(CoreSysAttributes):
             return True
 
         finally:
-            self.sys_core.state = CoreStates.RUNNING
+            self.sys_core.state = CoreState.RUNNING
             self.lock.release()

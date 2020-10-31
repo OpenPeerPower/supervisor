@@ -3,22 +3,19 @@ import asyncio
 import logging
 
 from ..coresys import CoreSys, CoreSysAttributes
-from ..exceptions import HassioError
+from ..exceptions import OppioError
+from ..resolution.const import ContextType, IssueType, SuggestionType
 from .audio import Audio
 from .cli import HaCli
 from .dns import CoreDNS
 from .multicast import Multicast
+from .observer import Observer
 
 _LOGGER: logging.Logger = logging.getLogger(__name__)
 
 
 class PluginManager(CoreSysAttributes):
     """Manage supported function for plugins."""
-
-    required_cli: int = 25
-    required_dns: int = 9
-    required_audio: int = 14
-    required_multicast: int = 2
 
     def __init__(self, coresys: CoreSys):
         """Initialize plugin manager."""
@@ -27,6 +24,7 @@ class PluginManager(CoreSysAttributes):
         self._cli: HaCli = HaCli(coresys)
         self._dns: CoreDNS = CoreDNS(coresys)
         self._audio: Audio = Audio(coresys)
+        self._observer: Observer = Observer(coresys)
         self._multicast: Multicast = Multicast(coresys)
 
     @property
@@ -45,6 +43,11 @@ class PluginManager(CoreSysAttributes):
         return self._audio
 
     @property
+    def observer(self) -> Observer:
+        """Return observer handler."""
+        return self._observer
+
+    @property
     def multicast(self) -> Multicast:
         """Return multicast handler."""
         return self._multicast
@@ -56,43 +59,56 @@ class PluginManager(CoreSysAttributes):
             self.dns,
             self.audio,
             self.cli,
+            self.observer,
             self.multicast,
         ):
             try:
                 await plugin.load()
-            except Exception:  # pylint: disable=broad-except
-                _LOGGER.warning("Can't load plugin %s", type(plugin).__name__)
+            except Exception as err:  # pylint: disable=broad-except
+                _LOGGER.warning("Can't load plugin %s: %s", plugin.slug, err)
+                self.sys_resolution.create_issue(
+                    IssueType.FATAL_ERROR,
+                    ContextType.PLUGIN,
+                    reference=plugin.slug,
+                    suggestions=[SuggestionType.EXECUTE_REPAIR],
+                )
+                self.sys_capture_exception(err)
 
         # Check requirements
-        for plugin, required_version in (
-            (self._audio, self.required_audio),
-            (self._dns, self.required_dns),
-            (self._cli, self.required_cli),
-            (self._multicast, self.required_multicast),
+        await self.sys_updater.reload()
+        for plugin in (
+            self.dns,
+            self.audio,
+            self.cli,
+            self.observer,
+            self.multicast,
         ):
             # Check if need an update
-            try:
-                if int(plugin.version) >= required_version:
-                    continue
-            except TypeError:
-                _LOGGER.warning(
-                    "Somethings going wrong with requirements on %s",
-                    type(plugin).__name__,
-                )
+            if not plugin.need_update:
+                continue
 
             _LOGGER.info(
-                "Requirement need update for %s - %i",
-                type(plugin).__name__,
-                required_version,
+                "%s does not have the latest version %s, updating",
+                plugin.slug,
+                plugin.latest_version,
             )
             try:
-                await plugin.update(version=str(required_version))
-            except HassioError:
+                await plugin.update()
+            except OppioError:
                 _LOGGER.error(
-                    "Can't update %s to %i but it's a reuirement, the Supervisor is not health now!",
-                    type(plugin).__name__,
-                    required_version,
+                    "Can't update %s to %s, the Supervisor healthy could be compromised!",
+                    plugin.slug,
+                    plugin.latest_version,
                 )
+                self.sys_resolution.create_issue(
+                    IssueType.UPDATE_FAILED,
+                    ContextType.PLUGIN,
+                    reference=plugin.slug,
+                    suggestions=[SuggestionType.EXECUTE_UPDATE],
+                )
+            except Exception as err:  # pylint: disable=broad-except
+                _LOGGER.warning("Can't update plugin %s: %s", plugin.slug, err)
+                self.sys_capture_exception(err)
 
     async def repair(self) -> None:
         """Repair Supervisor plugins."""
@@ -101,13 +117,10 @@ class PluginManager(CoreSysAttributes):
                 self.dns.repair(),
                 self.audio.repair(),
                 self.cli.repair(),
+                self.observer.repair(),
                 self.multicast.repair(),
             ]
         )
-
-    async def unload(self) -> None:
-        """Unload Supervisor plugin."""
-        await asyncio.wait([self.dns.unload()])
 
     async def shutdown(self) -> None:
         """Shutdown Supervisor plugin."""
@@ -120,5 +133,6 @@ class PluginManager(CoreSysAttributes):
         ):
             try:
                 await plugin.stop()
-            except Exception:  # pylint: disable=broad-except
-                _LOGGER.warning("Can't stop plugin %s", type(plugin).__name__)
+            except Exception as err:  # pylint: disable=broad-except
+                _LOGGER.warning("Can't stop plugin %s: %s", plugin.slug, err)
+                self.sys_capture_exception(err)

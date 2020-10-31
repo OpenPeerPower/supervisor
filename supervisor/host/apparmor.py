@@ -9,7 +9,7 @@ from ..utils.apparmor import validate_profile
 
 _LOGGER: logging.Logger = logging.getLogger(__name__)
 
-SYSTEMD_SERVICES = {"hassos-apparmor.service", "hassio-apparmor.service"}
+SYSTEMD_SERVICES = {"oppos-apparmor.service", "oppio-apparmor.service"}
 
 
 class AppArmorControl(CoreSysAttributes):
@@ -52,7 +52,7 @@ class AppArmorControl(CoreSysAttributes):
             self._profiles.add(content.name)
 
         # Is connected with systemd?
-        _LOGGER.info("Load AppArmor Profiles: %s", self._profiles)
+        _LOGGER.info("Loading AppArmor Profiles: %s", self._profiles)
         for service in SYSTEMD_SERVICES:
             if not self.sys_host.services.exists(service):
                 continue
@@ -67,7 +67,7 @@ class AppArmorControl(CoreSysAttributes):
     async def load_profile(self, profile_name, profile_file):
         """Load/Update a new/exists profile into AppArmor."""
         if not validate_profile(profile_name, profile_file):
-            _LOGGER.error("Profile is not valid with name %s", profile_name)
+            _LOGGER.error("AppArmor profile '%s' is not valid", profile_name)
             raise HostAppArmorError()
 
         # Copy to AppArmor folder
@@ -76,10 +76,10 @@ class AppArmorControl(CoreSysAttributes):
             shutil.copyfile(profile_file, dest_profile)
         except OSError as err:
             _LOGGER.error("Can't copy %s: %s", profile_file, err)
-            raise HostAppArmorError() from None
+            raise HostAppArmorError() from err
 
         # Load profiles
-        _LOGGER.info("Add or Update AppArmor profile: %s", profile_name)
+        _LOGGER.info("Adding/updating AppArmor profile: %s", profile_name)
         self._profiles.add(profile_name)
         if self.available:
             await self._reload_service()
@@ -94,7 +94,7 @@ class AppArmorControl(CoreSysAttributes):
                 profile_file.unlink()
             except OSError as err:
                 _LOGGER.error("Can't remove profile: %s", err)
-                raise HostAppArmorError()
+                raise HostAppArmorError() from err
             return
 
         # Marks als remove and start host process
@@ -103,9 +103,9 @@ class AppArmorControl(CoreSysAttributes):
             profile_file.rename(remove_profile)
         except OSError as err:
             _LOGGER.error("Can't mark profile as remove: %s", err)
-            raise HostAppArmorError()
+            raise HostAppArmorError() from err
 
-        _LOGGER.info("Remove AppArmor profile: %s", profile_name)
+        _LOGGER.info("Removing AppArmor profile: %s", profile_name)
         self._profiles.remove(profile_name)
         await self._reload_service()
 
@@ -117,4 +117,4 @@ class AppArmorControl(CoreSysAttributes):
             shutil.copy(profile_file, backup_file)
         except OSError as err:
             _LOGGER.error("Can't backup profile %s: %s", profile_name, err)
-            raise HostAppArmorError()
+            raise HostAppArmorError() from err

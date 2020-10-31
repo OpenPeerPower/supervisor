@@ -5,7 +5,7 @@ import platform
 from typing import List
 
 from .coresys import CoreSys, CoreSysAttributes
-from .exceptions import HassioArchNotFound, JsonFileError
+from .exceptions import OppioArchNotFound, JsonFileError
 from .utils.json import read_json_file
 
 _LOGGER: logging.Logger = logging.getLogger(__name__)
@@ -51,14 +51,14 @@ class CpuArch(CoreSysAttributes):
         try:
             arch_data = read_json_file(ARCH_JSON)
         except JsonFileError:
-            _LOGGER.warning("Can't read arch json")
+            _LOGGER.warning("Can't read arch json file from %s", ARCH_JSON)
             return
 
         native_support = self.detect_cpu()
 
         # Evaluate current CPU/Platform
         if not self.sys_machine or self.sys_machine not in arch_data:
-            _LOGGER.warning("Can't detect underlay machine type!")
+            _LOGGER.warning("Can't detect the machine type!")
             self._default_arch = native_support
             self._supported_arch.append(self.default)
             return
@@ -80,7 +80,7 @@ class CpuArch(CoreSysAttributes):
         for self_arch in self.supported:
             if self_arch in arch_list:
                 return self_arch
-        raise HassioArchNotFound()
+        raise OppioArchNotFound()
 
     def detect_cpu(self) -> str:
         """Return the arch type of local CPU."""

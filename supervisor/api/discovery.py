@@ -34,8 +34,8 @@ class APIDiscovery(CoreSysAttributes):
         return message
 
     def _check_permission_ha(self, request):
-        """Check permission for API call / Home Assistant."""
-        if request[REQUEST_FROM] != self.sys_homeassistant:
+        """Check permission for API call / Open Peer Power."""
+        if request[REQUEST_FROM] != self.sys_openpeerpower:
             raise APIForbidden("Only HomeAssistant can use this API!")
 
     @api_process

@@ -9,7 +9,7 @@ from ..const import (
     ATTR_SYSTEM,
     ATTR_USER,
     ATTR_VERSION,
-    FILE_HASSIO_ADDONS,
+    FILE_OPPIO_ADDONS,
 )
 from ..coresys import CoreSys, CoreSysAttributes
 from ..store.addon import AddonStore
@@ -27,7 +27,7 @@ class AddonsData(JsonConfig, CoreSysAttributes):
 
     def __init__(self, coresys: CoreSys):
         """Initialize data holder."""
-        super().__init__(FILE_HASSIO_ADDONS, SCHEMA_ADDONS_FILE)
+        super().__init__(FILE_OPPIO_ADDONS, SCHEMA_ADDONS_FILE)
         self.coresys: CoreSys = coresys
 
     @property

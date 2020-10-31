@@ -1,15 +1,13 @@
 """DNS docker object."""
-from contextlib import suppress
 import logging
 
 from ..const import ENV_TIME
 from ..coresys import CoreSysAttributes
-from ..exceptions import DockerAPIError
 from .interface import DockerInterface
 
 _LOGGER: logging.Logger = logging.getLogger(__name__)
 
-DNS_DOCKER_NAME: str = "hassio_dns"
+DNS_DOCKER_NAME: str = "oppio_dns"
 
 
 class DockerDNS(DockerInterface, CoreSysAttributes):
@@ -34,8 +32,7 @@ class DockerDNS(DockerInterface, CoreSysAttributes):
             return
 
         # Cleanup
-        with suppress(DockerAPIError):
-            self._stop()
+        self._stop()
 
         # Create & Run container
         docker_container = self.sys_docker.run(
@@ -47,15 +44,15 @@ class DockerDNS(DockerInterface, CoreSysAttributes):
             name=self.name,
             hostname=self.name.replace("_", "-"),
             detach=True,
-            environment={ENV_TIME: self.sys_timezone},
+            environment={ENV_TIME: self.sys_config.timezone},
             volumes={
-                str(self.sys_config.path_extern_dns): {"bind": "/config", "mode": "ro"}
+                str(self.sys_config.path_extern_dns): {"bind": "/config", "mode": "rw"}
             },
         )
 
         self._meta = docker_container.attrs
         _LOGGER.info(
-            "Start DNS %s with version %s - %s",
+            "Starting DNS %s with version %s - %s",
             self.image,
             self.version,
             self.sys_docker.network.dns,

@@ -15,18 +15,19 @@ from ..const import (
     ATTR_MEMORY_USAGE,
     ATTR_NETWORK_RX,
     ATTR_NETWORK_TX,
+    ATTR_UPDATE_AVAILABLE,
     ATTR_VERSION,
     ATTR_VERSION_LATEST,
     CONTENT_TYPE_BINARY,
 )
 from ..coresys import CoreSysAttributes
 from ..exceptions import APIError
-from ..validate import simple_version
+from ..validate import version_tag
 from .utils import api_process, api_process_raw, api_validate
 
 _LOGGER: logging.Logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = vol.Schema({vol.Optional(ATTR_VERSION): simple_version})
+SCHEMA_VERSION = vol.Schema({vol.Optional(ATTR_VERSION): version_tag})
 
 
 class APIMulticast(CoreSysAttributes):
@@ -38,6 +39,7 @@ class APIMulticast(CoreSysAttributes):
         return {
             ATTR_VERSION: self.sys_plugins.multicast.version,
             ATTR_VERSION_LATEST: self.sys_plugins.multicast.latest_version,
+            ATTR_UPDATE_AVAILABLE: self.sys_plugins.multicast.need_update,
         }
 
     @api_process

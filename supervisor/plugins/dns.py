@@ -1,6 +1,6 @@
-"""Home Assistant dns plugin.
+"""Open Peer Power dns plugin.
 
-Code: https://github.com/home-assistant/plugin-dns
+Code: https://github.com/open-peer-power/plugin-dns
 """
 import asyncio
 from contextlib import suppress
@@ -11,28 +11,23 @@ from typing import Awaitable, List, Optional
 
 import attr
 import jinja2
+from packaging.version import parse as pkg_parse
 import voluptuous as vol
 
-from ..const import (
-    ATTR_IMAGE,
-    ATTR_SERVERS,
-    ATTR_VERSION,
-    DNS_SUFFIX,
-    FILE_HASSIO_DNS,
-    LogLevel,
-)
+from ..const import ATTR_IMAGE, ATTR_SERVERS, ATTR_VERSION, DNS_SUFFIX, LogLevel
 from ..coresys import CoreSys, CoreSysAttributes
 from ..docker.dns import DockerDNS
 from ..docker.stats import DockerStats
-from ..exceptions import CoreDNSError, CoreDNSUpdateError, DockerAPIError
-from ..misc.forwarder import DNSForward
-from ..utils.json import JsonConfig
+from ..exceptions import CoreDNSError, CoreDNSUpdateError, DockerError, JsonFileError
+from ..resolution.const import ContextType, IssueType, SuggestionType
+from ..utils.json import JsonConfig, write_json_file
 from ..validate import dns_url
+from .const import FILE_OPPIO_DNS
 from .validate import SCHEMA_DNS_CONFIG
 
 _LOGGER: logging.Logger = logging.getLogger(__name__)
 
-COREDNS_TMPL: Path = Path(__file__).parents[1].joinpath("data/coredns.tmpl")
+HOSTS_TMPL: Path = Path(__file__).parents[1].joinpath("data/hosts.tmpl")
 RESOLV_TMPL: Path = Path(__file__).parents[1].joinpath("data/resolv.tmpl")
 HOST_RESOLV: Path = Path("/etc/resolv.conf")
 
@@ -46,29 +41,43 @@ class HostEntry:
 
 
 class CoreDNS(JsonConfig, CoreSysAttributes):
-    """Home Assistant core object for handle it."""
+    """Open Peer Power core object for handle it."""
+
+    slug: str = "dns"
 
     def __init__(self, coresys: CoreSys):
-        """Initialize hass object."""
-        super().__init__(FILE_HASSIO_DNS, SCHEMA_DNS_CONFIG)
+        """Initialize opp object."""
+        super().__init__(FILE_OPPIO_DNS, SCHEMA_DNS_CONFIG)
         self.coresys: CoreSys = coresys
         self.instance: DockerDNS = DockerDNS(coresys)
-        self.forwarder: DNSForward = DNSForward()
-        self.coredns_template: Optional[jinja2.Template] = None
         self.resolv_template: Optional[jinja2.Template] = None
+        self.hosts_template: Optional[jinja2.Template] = None
 
         self._hosts: List[HostEntry] = []
         self._loop: bool = False
 
     @property
-    def corefile(self) -> Path:
-        """Return Path to corefile."""
-        return Path(self.sys_config.path_dns, "corefile")
-
-    @property
     def hosts(self) -> Path:
         """Return Path to corefile."""
         return Path(self.sys_config.path_dns, "hosts")
+
+    @property
+    def coredns_config(self) -> Path:
+        """Return Path to coredns config file."""
+        return Path(self.sys_config.path_dns, "coredns.json")
+
+    @property
+    def locals(self) -> List[str]:
+        """Return list of local system DNS servers."""
+        servers: List[str] = []
+        for server in self.sys_host.network.dns_servers:
+            if server in servers:
+                continue
+            with suppress(vol.Invalid):
+                dns_url(server)
+                servers.append(server)
+
+        return servers
 
     @property
     def servers(self) -> List[str]:
@@ -95,7 +104,7 @@ class CoreDNS(JsonConfig, CoreSysAttributes):
         """Return current image of DNS."""
         if self._data.get(ATTR_IMAGE):
             return self._data[ATTR_IMAGE]
-        return f"homeassistant/{self.sys_arch.supervisor}-hassio-dns"
+        return f"openpeerpower/{self.sys_arch.supervisor}-oppio-dns"
 
     @image.setter
     def image(self, value: str) -> None:
@@ -115,20 +124,32 @@ class CoreDNS(JsonConfig, CoreSysAttributes):
     @property
     def need_update(self) -> bool:
         """Return True if an update is available."""
-        return self.version != self.latest_version
+        try:
+            return pkg_parse(self.version) < pkg_parse(self.latest_version)
+        except (TypeError, ValueError):
+            return True
 
     async def load(self) -> None:
         """Load DNS setup."""
-        self._init_hosts()
+        # Initialize CoreDNS Template
+        try:
+            self.resolv_template = jinja2.Template(RESOLV_TMPL.read_text())
+        except OSError as err:
+            _LOGGER.error("Can't read resolve.tmpl: %s", err)
+        try:
+            self.hosts_template = jinja2.Template(HOSTS_TMPL.read_text())
+        except OSError as err:
+            _LOGGER.error("Can't read hosts.tmpl: %s", err)
 
         # Check CoreDNS state
+        self._init_hosts()
         try:
             # Evaluate Version if we lost this information
             if not self.version:
-                self.version = await self.instance.get_latest_version(key=int)
+                self.version = await self.instance.get_latest_version()
 
             await self.instance.attach(tag=self.version)
-        except DockerAPIError:
+        except DockerError:
             _LOGGER.info(
                 "No CoreDNS plugin Docker image %s found.", self.instance.image
             )
@@ -141,43 +162,24 @@ class CoreDNS(JsonConfig, CoreSysAttributes):
             self.image = self.instance.image
             self.save_data()
 
-        # Start DNS forwarder
-        self.sys_create_task(self.forwarder.start(self.sys_docker.network.dns))
-
-        # Initialize CoreDNS Template
-        try:
-            self.coredns_template = jinja2.Template(COREDNS_TMPL.read_text())
-        except OSError as err:
-            _LOGGER.error("Can't read coredns.tmpl: %s", err)
-        try:
-            self.resolv_template = jinja2.Template(RESOLV_TMPL.read_text())
-        except OSError as err:
-            _LOGGER.error("Can't read coredns.tmpl: %s", err)
-
         # Run CoreDNS
         with suppress(CoreDNSError):
-            if await self.instance.is_running():
-                await self.restart()
-            else:
+            if not await self.instance.is_running():
                 await self.start()
 
         # Update supervisor
         self._write_resolv(HOST_RESOLV)
 
-    async def unload(self) -> None:
-        """Unload DNS forwarder."""
-        await self.forwarder.stop()
-
     async def install(self) -> None:
         """Install CoreDNS."""
-        _LOGGER.info("Setup CoreDNS plugin")
+        _LOGGER.info("Running setup for CoreDNS plugin")
         while True:
-            # read homeassistant tag and install it
+            # read openpeerpower tag and install it
             if not self.latest_version:
                 await self.sys_updater.reload()
 
             if self.latest_version:
-                with suppress(DockerAPIError):
+                with suppress(DockerError):
                     await self.instance.install(
                         self.latest_version, image=self.sys_updater.image_dns
                     )
@@ -205,16 +207,16 @@ class CoreDNS(JsonConfig, CoreSysAttributes):
         # Update
         try:
             await self.instance.update(version, image=self.sys_updater.image_dns)
-        except DockerAPIError:
-            _LOGGER.error("CoreDNS update fails")
-            raise CoreDNSUpdateError() from None
+        except DockerError as err:
+            _LOGGER.error("CoreDNS update failed")
+            raise CoreDNSUpdateError() from err
         else:
             self.version = version
             self.image = self.sys_updater.image_dns
             self.save_data()
 
         # Cleanup
-        with suppress(DockerAPIError):
+        with suppress(DockerError):
             await self.instance.cleanup(old_image=old_image)
 
         # Start CoreDNS
@@ -222,34 +224,34 @@ class CoreDNS(JsonConfig, CoreSysAttributes):
 
     async def restart(self) -> None:
         """Restart CoreDNS plugin."""
-        self._write_corefile()
-        _LOGGER.info("Restart CoreDNS plugin")
+        self._write_config()
+        _LOGGER.info("Restarting CoreDNS plugin")
         try:
             await self.instance.restart()
-        except DockerAPIError:
+        except DockerError as err:
             _LOGGER.error("Can't start CoreDNS plugin")
-            raise CoreDNSError()
+            raise CoreDNSError() from err
 
     async def start(self) -> None:
         """Run CoreDNS."""
-        self._write_corefile()
+        self._write_config()
 
         # Start Instance
-        _LOGGER.info("Start CoreDNS plugin")
+        _LOGGER.info("Starting CoreDNS plugin")
         try:
             await self.instance.run()
-        except DockerAPIError:
+        except DockerError as err:
             _LOGGER.error("Can't start CoreDNS plugin")
-            raise CoreDNSError() from None
+            raise CoreDNSError() from err
 
     async def stop(self) -> None:
         """Stop CoreDNS."""
-        _LOGGER.info("Stop CoreDNS plugin")
+        _LOGGER.info("Stopping CoreDNS plugin")
         try:
             await self.instance.stop()
-        except DockerAPIError:
+        except DockerError as err:
             _LOGGER.error("Can't stop CoreDNS plugin")
-            raise CoreDNSError() from None
+            raise CoreDNSError() from err
 
     async def reset(self) -> None:
         """Reset DNS and hosts."""
@@ -273,74 +275,77 @@ class CoreDNS(JsonConfig, CoreSysAttributes):
 
         # Check the log for loop plugin output
         if b"plugin/loop: Loop" in log:
-            _LOGGER.error("Detect a DNS loop in local Network!")
+            _LOGGER.error("Detected a DNS loop in local Network!")
             self._loop = True
+            self.sys_resolution.create_issue(
+                IssueType.DNS_LOOP,
+                ContextType.PLUGIN,
+                reference=self.slug,
+                suggestions=[SuggestionType.EXECUTE_RESET],
+            )
         else:
             self._loop = False
 
-    def _write_corefile(self) -> None:
+    def _write_config(self) -> None:
         """Write CoreDNS config."""
+        debug: bool = self.sys_config.logging == LogLevel.DEBUG
         dns_servers: List[str] = []
-        local_dns: List[str] = []
-        servers: List[str] = []
+        dns_locals: List[str] = []
 
         # Prepare DNS serverlist: Prio 1 Manual, Prio 2 Local, Prio 3 Fallback
         if not self._loop:
-            local_dns = self.sys_host.network.dns_servers or ["dns://127.0.0.11"]
-            servers = self.servers + local_dns
+            dns_servers = self.servers
+            dns_locals = self.locals
         else:
-            _LOGGER.warning("Ignore user DNS settings because of loop")
+            _LOGGER.warning("Ignoring user DNS settings because of loop")
 
         # Print some usefully debug data
         _LOGGER.debug(
-            "config-dns = %s, local-dns = %s , backup-dns = CloudFlare DoT",
-            self.servers,
-            local_dns,
+            "config-dns = %s, local-dns = %s , backup-dns = CloudFlare DoT / debug: %s",
+            dns_servers,
+            dns_locals,
+            debug,
         )
 
-        # Make sure, they are valid
-        for server in servers:
-            try:
-                dns_url(server)
-                if server not in dns_servers:
-                    dns_servers.append(server)
-            except vol.Invalid:
-                _LOGGER.warning("Ignore invalid DNS Server: %s", server)
-
-        # Generate config file
-        data = self.coredns_template.render(
-            locals=dns_servers, debug=self.sys_config.logging == LogLevel.DEBUG
-        )
-
+        # Write config to plugin
         try:
-            self.corefile.write_text(data)
-        except OSError as err:
-            _LOGGER.error("Can't update corefile: %s", err)
-            raise CoreDNSError() from None
+            write_json_file(
+                self.coredns_config,
+                {
+                    "servers": dns_servers,
+                    "locals": dns_locals,
+                    "debug": debug,
+                },
+            )
+        except JsonFileError as err:
+            _LOGGER.error("Can't update coredns config: %s", err)
+            raise CoreDNSError() from err
 
     def _init_hosts(self) -> None:
         """Import hosts entry."""
         # Generate Default
         self.add_host(IPv4Address("127.0.0.1"), ["localhost"], write=False)
         self.add_host(
-            self.sys_docker.network.supervisor, ["hassio", "supervisor"], write=False
+            self.sys_docker.network.supervisor, ["oppio", "supervisor"], write=False
         )
         self.add_host(
             self.sys_docker.network.gateway,
-            ["homeassistant", "home-assistant"],
+            ["openpeerpower", "open-peer-power"],
             write=False,
         )
         self.add_host(self.sys_docker.network.dns, ["dns"], write=False)
+        self.add_host(self.sys_docker.network.observer, ["observer"], write=False)
 
     def write_hosts(self) -> None:
         """Write hosts from memory to file."""
+        # Generate config file
+        data = self.hosts_template.render(entries=self._hosts)
+
         try:
-            with self.hosts.open("w") as hosts:
-                for entry in self._hosts:
-                    hosts.write(f"{entry.ip_address!s} {' '.join(entry.names)}\n")
+            self.hosts.write_text(data)
         except OSError as err:
-            _LOGGER.error("Can't write hosts file: %s", err)
-            raise CoreDNSError() from None
+            _LOGGER.error("Can't update hosts: %s", err)
+            raise CoreDNSError() from err
 
     def add_host(self, ipv4: IPv4Address, names: List[str], write: bool = True) -> None:
         """Add a new host entry."""
@@ -376,7 +381,7 @@ class CoreDNS(JsonConfig, CoreSysAttributes):
             _LOGGER.debug("Can't remove Host entry: %s", host)
             return
 
-        _LOGGER.debug("Remove Host entry %s - %s", entry.ip_address, entry.names)
+        _LOGGER.debug("Removing host entry %s - %s", entry.ip_address, entry.names)
         self._hosts.remove(entry)
 
         # Update hosts file
@@ -403,8 +408,8 @@ class CoreDNS(JsonConfig, CoreSysAttributes):
         """Return stats of CoreDNS."""
         try:
             return await self.instance.stats()
-        except DockerAPIError:
-            raise CoreDNSError() from None
+        except DockerError as err:
+            raise CoreDNSError() from err
 
     def is_running(self) -> Awaitable[bool]:
         """Return True if Docker container is running.
@@ -413,27 +418,28 @@ class CoreDNS(JsonConfig, CoreSysAttributes):
         """
         return self.instance.is_running()
 
-    def is_fails(self) -> Awaitable[bool]:
-        """Return True if a Docker container is fails state.
+    def is_failed(self) -> Awaitable[bool]:
+        """Return True if a Docker container is failed state.
 
         Return a coroutine.
         """
-        return self.instance.is_fails()
+        return self.instance.is_failed()
 
     async def repair(self) -> None:
         """Repair CoreDNS plugin."""
         if await self.instance.exists():
             return
 
-        _LOGGER.info("Repair CoreDNS %s", self.version)
+        _LOGGER.info("Repairing CoreDNS %s", self.version)
         try:
             await self.instance.install(self.version)
-        except DockerAPIError:
-            _LOGGER.error("Repairing of CoreDNS fails")
+        except DockerError as err:
+            _LOGGER.error("Repair of CoreDNS failed")
+            self.sys_capture_exception(err)
 
     def _write_resolv(self, resolv_conf: Path) -> None:
         """Update/Write resolv.conf file."""
-        nameservers = [f"{self.sys_docker.network.dns!s}", "127.0.0.11"]
+        nameservers = [str(self.sys_docker.network.dns), "127.0.0.11"]
 
         # Read resolv config
         data = self.resolv_template.render(servers=nameservers)

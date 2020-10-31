@@ -23,8 +23,8 @@ def test_basic_config():
     assert not valid_config["host_dbus"]
     assert not valid_config["host_pid"]
 
-    assert not valid_config["hassio_api"]
-    assert not valid_config["homeassistant_api"]
+    assert not valid_config["oppio_api"]
+    assert not valid_config["openpeerpower_api"]
     assert not valid_config["docker_api"]
 
 
@@ -36,7 +36,7 @@ def test_invalid_repository():
     with pytest.raises(vol.Invalid):
         vd.SCHEMA_ADDON_CONFIG(config)
 
-    config["image"] = "homeassistant/no-valid-repo:no-tag-allow"
+    config["image"] = "openpeerpower/no-valid-repo:no-tag-allow"
     with pytest.raises(vol.Invalid):
         vd.SCHEMA_ADDON_CONFIG(config)
 
@@ -70,3 +70,100 @@ def test_valid_basic_build():
     config = load_json_fixture("basic-build-config.json")
 
     vd.SCHEMA_BUILD_CONFIG(config)
+
+
+def test_valid_machine():
+    """Validate valid machine config."""
+    config = load_json_fixture("basic-addon-config.json")
+
+    config["machine"] = [
+        "intel-nuc",
+        "odroid-c2",
+        "odroid-n2",
+        "odroid-xu",
+        "qemuarm-64",
+        "qemuarm",
+        "qemux86-64",
+        "qemux86",
+        "raspberrypi",
+        "raspberrypi2",
+        "raspberrypi3-64",
+        "raspberrypi3",
+        "raspberrypi4-64",
+        "raspberrypi4",
+        "tinker",
+    ]
+
+    assert vd.SCHEMA_ADDON_CONFIG(config)
+
+    config["machine"] = [
+        "!intel-nuc",
+        "!odroid-c2",
+        "!odroid-n2",
+        "!odroid-xu",
+        "!qemuarm-64",
+        "!qemuarm",
+        "!qemux86-64",
+        "!qemux86",
+        "!raspberrypi",
+        "!raspberrypi2",
+        "!raspberrypi3-64",
+        "!raspberrypi3",
+        "!raspberrypi4-64",
+        "!raspberrypi4",
+        "!tinker",
+    ]
+
+    assert vd.SCHEMA_ADDON_CONFIG(config)
+
+    config["machine"] = [
+        "odroid-n2",
+        "!odroid-xu",
+        "qemuarm-64",
+        "!qemuarm",
+        "qemux86-64",
+        "qemux86",
+        "raspberrypi",
+        "raspberrypi4-64",
+        "raspberrypi4",
+        "!tinker",
+    ]
+
+    assert vd.SCHEMA_ADDON_CONFIG(config)
+
+
+def test_invalid_machine():
+    """Validate invalid machine config."""
+    config = load_json_fixture("basic-addon-config.json")
+
+    config["machine"] = [
+        "intel-nuc",
+        "raspberrypi3",
+        "raspberrypi4-64",
+        "raspberrypi4",
+        "tinkerxy",
+    ]
+
+    with pytest.raises(vol.Invalid):
+        assert vd.SCHEMA_ADDON_CONFIG(config)
+
+    config["machine"] = [
+        "intel-nuc",
+        "intel-nuc",
+    ]
+
+    with pytest.raises(vol.Invalid):
+        assert vd.SCHEMA_ADDON_CONFIG(config)
+
+
+def test_watchdog_url():
+    """Test Valid watchdog options."""
+    config = load_json_fixture("basic-addon-config.json")
+
+    for test_options in (
+        "tcp://[HOST]:[PORT:8123]",
+        "http://[HOST]:[PORT:8080]/health",
+        "https://[HOST]:[PORT:80]/",
+    ):
+        config["watchdog"] = test_options
+        assert vd.SCHEMA_ADDON_CONFIG(config)

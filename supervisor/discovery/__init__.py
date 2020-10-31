@@ -1,4 +1,4 @@
-"""Handle discover message for Home Assistant."""
+"""Handle discover message for Open Peer Power."""
 from __future__ import annotations
 
 from contextlib import suppress
@@ -10,7 +10,7 @@ import attr
 import voluptuous as vol
 from voluptuous.humanize import humanize_error
 
-from ..const import ATTR_CONFIG, ATTR_DISCOVERY, FILE_HASSIO_DISCOVERY
+from ..const import ATTR_CONFIG, ATTR_DISCOVERY, FILE_OPPIO_DISCOVERY
 from ..coresys import CoreSys, CoreSysAttributes
 from ..exceptions import DiscoveryError, HomeAssistantAPIError
 from ..utils.json import JsonConfig
@@ -36,11 +36,11 @@ class Message:
 
 
 class Discovery(CoreSysAttributes, JsonConfig):
-    """Home Assistant Discovery handler."""
+    """Open Peer Power Discovery handler."""
 
     def __init__(self, coresys: CoreSys):
         """Initialize discovery handler."""
-        super().__init__(FILE_HASSIO_DISCOVERY, SCHEMA_DISCOVERY_CONFIG)
+        super().__init__(FILE_OPPIO_DISCOVERY, SCHEMA_DISCOVERY_CONFIG)
         self.coresys: CoreSys = coresys
         self.message_obj: Dict[str, Message] = {}
 
@@ -51,7 +51,7 @@ class Discovery(CoreSysAttributes, JsonConfig):
             discovery = Message(**message)
             messages[discovery.uuid] = discovery
 
-        _LOGGER.info("Load %d messages", len(messages))
+        _LOGGER.info("Loaded %d messages", len(messages))
         self.message_obj = messages
 
     def save(self) -> None:
@@ -74,12 +74,12 @@ class Discovery(CoreSysAttributes, JsonConfig):
         return list(self.message_obj.values())
 
     def send(self, addon: Addon, service: str, config: Dict[str, Any]) -> Message:
-        """Send a discovery message to Home Assistant."""
+        """Send a discovery message to Open Peer Power."""
         try:
             config = valid_discovery_config(service, config)
         except vol.Invalid as err:
             _LOGGER.error("Invalid discovery %s config", humanize_error(config, err))
-            raise DiscoveryError() from None
+            raise DiscoveryError() from err
 
         # Create message
         message = Message(addon.slug, service, config)
@@ -96,7 +96,9 @@ class Discovery(CoreSysAttributes, JsonConfig):
                 return exists_msg
             break
 
-        _LOGGER.info("Send discovery to Home Assistant %s from %s", service, addon.slug)
+        _LOGGER.info(
+            "Sending discovery to Open Peer Power %s from %s", service, addon.slug
+        )
         self.message_obj[message.uuid] = message
         self.save()
 
@@ -104,12 +106,12 @@ class Discovery(CoreSysAttributes, JsonConfig):
         return message
 
     def remove(self, message: Message) -> None:
-        """Remove a discovery message from Home Assistant."""
+        """Remove a discovery message from Open Peer Power."""
         self.message_obj.pop(message.uuid, None)
         self.save()
 
         _LOGGER.info(
-            "Delete discovery to Home Assistant %s from %s",
+            "Delete discovery to Open Peer Power %s from %s",
             message.service,
             message.addon,
         )
@@ -117,7 +119,7 @@ class Discovery(CoreSysAttributes, JsonConfig):
 
     async def _push_discovery(self, message: Message, command: str) -> None:
         """Send a discovery request."""
-        if not await self.sys_homeassistant.check_api_state():
+        if not await self.sys_openpeerpower.api.check_api_state():
             _LOGGER.info("Discovery %s message ignore", message.uuid)
             return
 
@@ -125,9 +127,9 @@ class Discovery(CoreSysAttributes, JsonConfig):
         data.pop(ATTR_CONFIG)
 
         with suppress(HomeAssistantAPIError):
-            async with self.sys_homeassistant.make_request(
+            async with self.sys_openpeerpower.api.make_request(
                 command,
-                f"api/hassio_push/discovery/{message.uuid}",
+                f"api/oppio_push/discovery/{message.uuid}",
                 json=data,
                 timeout=10,
             ):

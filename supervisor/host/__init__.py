@@ -2,15 +2,9 @@
 from contextlib import suppress
 import logging
 
-from ..const import (
-    FEATURES_HASSOS,
-    FEATURES_HOSTNAME,
-    FEATURES_REBOOT,
-    FEATURES_SERVICES,
-    FEATURES_SHUTDOWN,
-)
+from ..const import HostFeature
 from ..coresys import CoreSys, CoreSysAttributes
-from ..exceptions import HassioError, PulseAudioError
+from ..exceptions import OppioError, PulseAudioError
 from .apparmor import AppArmorControl
 from .control import SystemControl
 from .info import InfoCenter
@@ -66,18 +60,23 @@ class HostManager(CoreSysAttributes):
         return self._sound
 
     @property
-    def supperted_features(self):
+    def supported_features(self):
         """Return a list of supported host features."""
         features = []
 
         if self.sys_dbus.systemd.is_connected:
-            features.extend([FEATURES_REBOOT, FEATURES_SHUTDOWN, FEATURES_SERVICES])
+            features.extend(
+                [HostFeature.REBOOT, HostFeature.SHUTDOWN, HostFeature.SERVICES]
+            )
+
+        if self.sys_dbus.network.is_connected and self.sys_dbus.network.interfaces:
+            features.append(HostFeature.NETWORK)
 
         if self.sys_dbus.hostname.is_connected:
-            features.append(FEATURES_HOSTNAME)
+            features.append(HostFeature.HOSTNAME)
 
-        if self.sys_hassos.available:
-            features.append(FEATURES_HASSOS)
+        if self.sys_oppos.available:
+            features.append(HostFeature.OPPOS)
 
         return features
 
@@ -89,7 +88,7 @@ class HostManager(CoreSysAttributes):
         if self.sys_dbus.systemd.is_connected:
             await self.services.update()
 
-        if self.sys_dbus.nmi_dns.is_connected:
+        if self.sys_dbus.network.is_connected:
             await self.network.update()
 
         with suppress(PulseAudioError):
@@ -97,11 +96,11 @@ class HostManager(CoreSysAttributes):
 
     async def load(self):
         """Load host information."""
-        with suppress(HassioError):
+        with suppress(OppioError):
             await self.reload()
 
         # Load profile data
         try:
             await self.apparmor.load()
-        except HassioError as err:
-            _LOGGER.waring("Load host AppArmor on start fails: %s", err)
+        except OppioError as err:
+            _LOGGER.warning("Loading host AppArmor on start failed: %s", err)

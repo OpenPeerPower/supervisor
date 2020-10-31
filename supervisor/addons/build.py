@@ -33,7 +33,7 @@ class AddonBuild(JsonConfig, CoreSysAttributes):
     def base_image(self) -> str:
         """Return base image for this add-on."""
         return self._data[ATTR_BUILD_FROM].get(
-            self.sys_arch.default, f"homeassistant/{self.sys_arch.default}-base:latest"
+            self.sys_arch.default, f"openpeerpower/{self.sys_arch.default}-base:latest"
         )
 
     @property
@@ -55,11 +55,11 @@ class AddonBuild(JsonConfig, CoreSysAttributes):
             "forcerm": True,
             "squash": self.squash,
             "labels": {
-                "io.hass.version": version,
-                "io.hass.arch": self.sys_arch.default,
-                "io.hass.type": META_ADDON,
-                "io.hass.name": self._fix_label("name"),
-                "io.hass.description": self._fix_label("description"),
+                "io.opp.version": version,
+                "io.opp.arch": self.sys_arch.default,
+                "io.opp.type": META_ADDON,
+                "io.opp.name": self._fix_label("name"),
+                "io.opp.description": self._fix_label("description"),
             },
             "buildargs": {
                 "BUILD_FROM": self.base_image,
@@ -70,7 +70,7 @@ class AddonBuild(JsonConfig, CoreSysAttributes):
         }
 
         if self.addon.url:
-            args["labels"]["io.hass.url"] = self.addon.url
+            args["labels"]["io.opp.url"] = self.addon.url
 
         return args
 

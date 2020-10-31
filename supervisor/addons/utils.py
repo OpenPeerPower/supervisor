@@ -39,7 +39,7 @@ def rating_security(addon: AddonModel) -> int:
     elif addon.apparmor == SECURITY_PROFILE:
         rating += 1
 
-    # Home Assistant Login & Ingress
+    # Open Peer Power Login & Ingress
     if addon.with_ingress:
         rating += 2
     elif addon.access_auth_api:
@@ -60,9 +60,9 @@ def rating_security(addon: AddonModel) -> int:
         rating += -1
 
     # API Supervisor role
-    if addon.hassio_role == ROLE_MANAGER:
+    if addon.oppio_role == ROLE_MANAGER:
         rating += -1
-    elif addon.hassio_role == ROLE_ADMIN:
+    elif addon.oppio_role == ROLE_ADMIN:
         rating += -2
 
     # Not secure Networking

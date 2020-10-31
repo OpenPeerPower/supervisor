@@ -5,9 +5,10 @@ import logging
 from typing import List, Optional
 
 import docker
+import requests
 
 from ..const import DOCKER_NETWORK, DOCKER_NETWORK_MASK, DOCKER_NETWORK_RANGE
-from ..exceptions import DockerAPIError
+from ..exceptions import DockerError
 
 _LOGGER: logging.Logger = logging.getLogger(__name__)
 
@@ -31,7 +32,16 @@ class DockerNetwork:
     @property
     def containers(self) -> List[docker.models.containers.Container]:
         """Return of connected containers from network."""
-        return self.network.containers
+        containers: List[docker.models.containers.Container] = []
+        for cid, _ in self.network.attrs.get("Containers", {}).items():
+            try:
+                containers.append(self.docker.containers.get(cid))
+            except docker.errors.NotFound:
+                _LOGGER.warning("Docker network is corrupt! %s", cid)
+            except (docker.errors.DockerException, requests.RequestException) as err:
+                _LOGGER.error("Unknown error with container lookup %s", err)
+
+        return containers
 
     @property
     def gateway(self) -> IPv4Address:
@@ -58,12 +68,17 @@ class DockerNetwork:
         """Return cli of the network."""
         return DOCKER_NETWORK_MASK[5]
 
+    @property
+    def observer(self) -> IPv4Address:
+        """Return observer of the network."""
+        return DOCKER_NETWORK_MASK[6]
+
     def _get_network(self) -> docker.models.networks.Network:
         """Get supervisor network."""
         try:
             return self.docker.networks.get(DOCKER_NETWORK)
         except docker.errors.NotFound:
-            _LOGGER.info("Can't find Supervisor network, create new network")
+            _LOGGER.info("Can't find Supervisor network, creating a new network")
 
         ipam_pool = docker.types.IPAMPool(
             subnet=str(DOCKER_NETWORK_MASK),
@@ -93,13 +108,22 @@ class DockerNetwork:
         """
         ipv4_address = str(ipv4) if ipv4 else None
 
+        # Reload Network information
+        with suppress(docker.errors.DockerException, requests.RequestException):
+            self.network.reload()
+
+        # Check stale Network
+        if container.name in (
+            val.get("Name") for val in self.network.attrs.get("Containers", {}).values()
+        ):
+            self.stale_cleanup(container.name)
+
+        # Attach Network
         try:
             self.network.connect(container, aliases=alias, ipv4_address=ipv4_address)
         except docker.errors.APIError as err:
-            _LOGGER.error("Can't link container to hassio-net: %s", err)
-            raise DockerAPIError() from None
-
-        self.network.reload()
+            _LOGGER.error("Can't link container to oppio-net: %s", err)
+            raise DockerError() from err
 
     def detach_default_bridge(
         self, container: docker.models.containers.Container
@@ -117,12 +141,16 @@ class DockerNetwork:
 
         except docker.errors.APIError as err:
             _LOGGER.warning("Can't disconnect container from default: %s", err)
-            raise DockerAPIError() from None
+            raise DockerError() from err
 
     def stale_cleanup(self, container_name: str):
         """Remove force a container from Network.
 
         Fix: https://github.com/moby/moby/issues/23302
         """
-        with suppress(docker.errors.APIError):
+        try:
             self.network.disconnect(container_name, force=True)
+        except docker.errors.NotFound:
+            pass
+        except (docker.errors.DockerException, requests.RequestException) as err:
+            raise DockerError() from err

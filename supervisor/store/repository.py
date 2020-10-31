@@ -8,7 +8,7 @@ from ..const import (
 )
 from ..coresys import CoreSysAttributes
 from ..exceptions import APIError
-from .git import GitRepoCustom, GitRepoHassIO
+from .git import GitRepoCustom, GitRepoOppIO
 from .utils import get_hash_from_repository
 
 UNKNOWN = "unknown"
@@ -29,7 +29,7 @@ class Repository(CoreSysAttributes):
             self.slug = repository
         elif repository == REPOSITORY_CORE:
             self.slug = repository
-            self.git = GitRepoHassIO(coresys)
+            self.git = GitRepoOppIO(coresys)
         else:
             self.slug = get_hash_from_repository(repository)
             self.git = GitRepoCustom(coresys, repository)
@@ -67,9 +67,9 @@ class Repository(CoreSysAttributes):
             return await self.git.pull()
         return True
 
-    def remove(self):
+    async def remove(self):
         """Remove add-on repository."""
         if self.slug in (REPOSITORY_CORE, REPOSITORY_LOCAL):
             raise APIError("Can't remove built-in repositories!")
 
-        self.git.remove()
+        await self.git.remove()

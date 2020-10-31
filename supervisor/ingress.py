@@ -6,7 +6,7 @@ import secrets
 from typing import Dict, List, Optional
 
 from .addons.addon import Addon
-from .const import ATTR_PORTS, ATTR_SESSION, FILE_HASSIO_INGRESS
+from .const import ATTR_PORTS, ATTR_SESSION, FILE_OPPIO_INGRESS
 from .coresys import CoreSys, CoreSysAttributes
 from .utils import check_port
 from .utils.dt import utc_from_timestamp, utcnow
@@ -21,15 +21,15 @@ class Ingress(JsonConfig, CoreSysAttributes):
 
     def __init__(self, coresys: CoreSys):
         """Initialize updater."""
-        super().__init__(FILE_HASSIO_INGRESS, SCHEMA_INGRESS_CONFIG)
+        super().__init__(FILE_OPPIO_INGRESS, SCHEMA_INGRESS_CONFIG)
         self.coresys: CoreSys = coresys
         self.tokens: Dict[str, str] = {}
 
     def get(self, token: str) -> Optional[Addon]:
         """Return addon they have this ingress token."""
         if token not in self.tokens:
-            self._update_token_list()
-        return self.sys_addons.get(self.tokens.get(token))
+            return None
+        return self.sys_addons.get(self.tokens[token], local_only=True)
 
     @property
     def sessions(self) -> Dict[str, float]:
@@ -56,11 +56,12 @@ class Ingress(JsonConfig, CoreSysAttributes):
         self._update_token_list()
         self._cleanup_sessions()
 
-        _LOGGER.info("Load %d ingress session", len(self.sessions))
+        _LOGGER.info("Loaded %d ingress sessions", len(self.sessions))
 
     async def reload(self) -> None:
         """Reload/Validate sessions."""
         self._cleanup_sessions()
+        self._update_token_list()
 
     async def unload(self) -> None:
         """Shutdown sessions."""
@@ -76,7 +77,7 @@ class Ingress(JsonConfig, CoreSysAttributes):
             try:
                 valid_dt = utc_from_timestamp(valid)
             except OverflowError:
-                _LOGGER.warning("Session timestamp %f is invalid!", valid_dt)
+                _LOGGER.warning("Session timestamp %f is invalid!", valid)
                 continue
 
             if valid_dt < now:
@@ -114,7 +115,7 @@ class Ingress(JsonConfig, CoreSysAttributes):
         try:
             valid_until = utc_from_timestamp(self.sessions[session])
         except OverflowError:
-            _LOGGER.warning("Session timestamp %f is invalid!", valid_until)
+            _LOGGER.warning("Session timestamp %f is invalid!", self.sessions[session])
             return False
 
         # Is still valid?
@@ -153,16 +154,16 @@ class Ingress(JsonConfig, CoreSysAttributes):
         del self.ports[addon_slug]
         self.save_data()
 
-    async def update_hass_panel(self, addon: Addon):
-        """Return True if Home Assistant up and running."""
-        if not await self.sys_homeassistant.is_running():
-            _LOGGER.debug("Ignore panel update on Core")
+    async def update_opp_panel(self, addon: Addon):
+        """Return True if Open Peer Power up and running."""
+        if not await self.sys_openpeerpower.core.is_running():
+            _LOGGER.debug("Ignoring panel update on Core")
             return
 
         # Update UI
         method = "post" if addon.ingress_panel else "delete"
-        async with self.sys_homeassistant.make_request(
-            method, f"api/hassio_push/panel/{addon.slug}"
+        async with self.sys_openpeerpower.api.make_request(
+            method, f"api/oppio_push/panel/{addon.slug}"
         ) as resp:
             if resp.status in (200, 201):
                 _LOGGER.info("Update Ingress as panel for %s", addon.slug)

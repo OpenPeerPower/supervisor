@@ -1,37 +1,41 @@
 """Core Exceptions."""
 
 
-class HassioError(Exception):
+class OppioError(Exception):
     """Root exception."""
 
 
-class HassioNotSupportedError(HassioError):
+class OppioNotSupportedError(OppioError):
     """Function is not supported."""
 
 
 # HomeAssistant
 
 
-class HomeAssistantError(HassioError):
-    """Home Assistant exception."""
+class HomeAssistantError(OppioError):
+    """Open Peer Power exception."""
 
 
 class HomeAssistantUpdateError(HomeAssistantError):
-    """Error on update of a Home Assistant."""
+    """Error on update of a Open Peer Power."""
+
+
+class HomeAssistantCrashError(HomeAssistantError):
+    """Error on crash of a Open Peer Power startup."""
 
 
 class HomeAssistantAPIError(HomeAssistantError):
-    """Home Assistant API exception."""
+    """Open Peer Power API exception."""
 
 
 class HomeAssistantAuthError(HomeAssistantAPIError):
-    """Home Assistant Auth API exception."""
+    """Open Peer Power Auth API exception."""
 
 
 # Supervisor
 
 
-class SupervisorError(HassioError):
+class SupervisorError(OppioError):
     """Supervisor error."""
 
 
@@ -39,25 +43,25 @@ class SupervisorUpdateError(SupervisorError):
     """Supervisor update error."""
 
 
-# HassOS
+# OppOS
 
 
-class HassOSError(HassioError):
-    """HassOS exception."""
+class OppOSError(OppioError):
+    """OppOS exception."""
 
 
-class HassOSUpdateError(HassOSError):
-    """Error on update of a HassOS."""
+class OppOSUpdateError(OppOSError):
+    """Error on update of a OppOS."""
 
 
-class HassOSNotSupportedError(HassioNotSupportedError):
-    """Function not supported by HassOS."""
+class OppOSNotSupportedError(OppioNotSupportedError):
+    """Function not supported by OppOS."""
 
 
 # HaCli
 
 
-class CliError(HassioError):
+class CliError(OppioError):
     """HA cli exception."""
 
 
@@ -65,10 +69,21 @@ class CliUpdateError(CliError):
     """Error on update of a HA cli."""
 
 
+# Observer
+
+
+class ObserverError(OppioError):
+    """General Observer exception."""
+
+
+class ObserverUpdateError(ObserverError):
+    """Error on update of a Observer."""
+
+
 # Multicast
 
 
-class MulticastError(HassioError):
+class MulticastError(OppioError):
     """Multicast exception."""
 
 
@@ -79,7 +94,7 @@ class MulticastUpdateError(MulticastError):
 # DNS
 
 
-class CoreDNSError(HassioError):
+class CoreDNSError(OppioError):
     """CoreDNS exception."""
 
 
@@ -90,7 +105,7 @@ class CoreDNSUpdateError(CoreDNSError):
 # DNS
 
 
-class AudioError(HassioError):
+class AudioError(OppioError):
     """PulseAudio exception."""
 
 
@@ -101,62 +116,66 @@ class AudioUpdateError(AudioError):
 # Addons
 
 
-class AddonsError(HassioError):
+class AddonsError(OppioError):
     """Addons exception."""
 
 
-class AddonsNotSupportedError(HassioNotSupportedError):
+class AddonConfigurationError(AddonsError):
+    """Error with add-on configuration."""
+
+
+class AddonsNotSupportedError(OppioNotSupportedError):
     """Addons don't support a function."""
 
 
 # Arch
 
 
-class HassioArchNotFound(HassioNotSupportedError):
+class OppioArchNotFound(OppioNotSupportedError):
     """No matches with exists arch."""
 
 
 # Updater
 
 
-class HassioUpdaterError(HassioError):
+class OppioUpdaterError(OppioError):
     """Error on Updater."""
 
 
 # Auth
 
 
-class AuthError(HassioError):
+class AuthError(OppioError):
     """Auth errors."""
 
 
-class AuthPasswordResetError(HassioError):
-    """Auth error if password reset fails."""
+class AuthPasswordResetError(OppioError):
+    """Auth error if password reset failed."""
 
 
 # Host
 
 
-class HostError(HassioError):
+class HostError(OppioError):
     """Internal Host error."""
 
 
-class HostNotSupportedError(HassioNotSupportedError):
+class HostNotSupportedError(OppioNotSupportedError):
     """Host function is not supprted."""
 
 
 class HostServiceError(HostError):
-    """Host service functions fails."""
+    """Host service functions failed."""
 
 
 class HostAppArmorError(HostError):
-    """Host apparmor functions fails."""
+    """Host apparmor functions failed."""
 
 
 # API
 
 
-class APIError(HassioError, RuntimeError):
+class APIError(OppioError, RuntimeError):
     """API errors."""
 
 
@@ -167,18 +186,18 @@ class APIForbidden(APIError):
 # Service / Discovery
 
 
-class DiscoveryError(HassioError):
+class DiscoveryError(OppioError):
     """Discovery Errors."""
 
 
-class ServicesError(HassioError):
+class ServicesError(OppioError):
     """Services Errors."""
 
 
 # utils/gdbus
 
 
-class DBusError(HassioError):
+class DBusError(OppioError):
     """DBus generic error."""
 
 
@@ -186,7 +205,7 @@ class DBusNotConnectedError(HostNotSupportedError):
     """DBus is not connected and call a method."""
 
 
-class DBusInterfaceError(HassioNotSupportedError):
+class DBusInterfaceError(OppioNotSupportedError):
     """DBus interface not connected."""
 
 
@@ -216,26 +235,49 @@ class AppArmorInvalidError(AppArmorError):
 # util/json
 
 
-class JsonFileError(HassioError):
+class JsonFileError(OppioError):
     """Invalid json file."""
 
 
 # docker/api
 
 
-class DockerAPIError(HassioError):
+class DockerError(OppioError):
+    """Docker API/Transport errors."""
+
+
+class DockerAPIError(DockerError):
     """Docker API error."""
+
+
+class DockerRequestError(DockerError):
+    """Dockerd OS issues."""
+
+
+class DockerNotFound(DockerError):
+    """Docker object don't Exists."""
 
 
 # Hardware
 
 
-class HardwareNotSupportedError(HassioNotSupportedError):
+class HardwareNotSupportedError(OppioNotSupportedError):
     """Raise if hardware function is not supported."""
 
 
 # Pulse Audio
 
 
-class PulseAudioError(HassioError):
+class PulseAudioError(OppioError):
     """Raise if an sound error is happening."""
+
+
+# Resolution
+
+
+class ResolutionError(OppioError):
+    """Raise if an error is happning on resoltuion."""
+
+
+class ResolutionNotFound(ResolutionError):
+    """Raise if suggestion/issue was not found."""

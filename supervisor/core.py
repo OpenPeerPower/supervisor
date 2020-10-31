@@ -2,12 +2,27 @@
 import asyncio
 from contextlib import suppress
 import logging
+from typing import Awaitable, List, Optional
 
 import async_timeout
 
-from .const import AddonStartup, CoreStates
+from .const import (
+    RUN_SUPERVISOR_STATE,
+    SOCKET_DBUS,
+    SUPERVISED_SUPPORTED_OS,
+    AddonStartup,
+    CoreState,
+    HostFeature,
+)
 from .coresys import CoreSys, CoreSysAttributes
-from .exceptions import HassioError, HomeAssistantError, SupervisorUpdateError
+from .exceptions import (
+    DockerError,
+    OppioError,
+    HomeAssistantCrashError,
+    HomeAssistantError,
+    SupervisorUpdateError,
+)
+from .resolution.const import ContextType, IssueType, UnsupportedReason
 
 _LOGGER: logging.Logger = logging.getLogger(__name__)
 
@@ -18,110 +33,192 @@ class Core(CoreSysAttributes):
     def __init__(self, coresys: CoreSys):
         """Initialize Supervisor object."""
         self.coresys: CoreSys = coresys
-        self.state: CoreStates = CoreStates.INITIALIZE
         self.healthy: bool = True
+        self._state: Optional[CoreState] = None
+
+    @property
+    def state(self) -> CoreState:
+        """Return state of the core."""
+        return self._state
+
+    @property
+    def supported(self) -> CoreState:
+        """Return true if the installation is supported."""
+        return len(self.sys_resolution.unsupported) == 0
+
+    @state.setter
+    def state(self, new_state: CoreState) -> None:
+        """Set core into new state."""
+        try:
+            RUN_SUPERVISOR_STATE.write_text(new_state.value)
+        except OSError as err:
+            _LOGGER.warning(
+                "Can't update the Supervisor state to %s: %s", new_state, err
+            )
+        finally:
+            self._state = new_state
 
     async def connect(self):
         """Connect Supervisor container."""
+        self.state = CoreState.INITIALIZE
+
+        # Load information from container
         await self.sys_supervisor.load()
 
-        # If a update is failed?
-        if self.sys_dev:
-            self.sys_config.version = self.sys_supervisor.version
-        elif self.sys_config.version != self.sys_supervisor.version:
-            self.healthy = False
-            _LOGGER.critical("Update of Supervisor fails!")
-
-        # If local docker is supported?
+        # If host docker is supported?
         if not self.sys_docker.info.supported_version:
+            self.sys_resolution.unsupported = UnsupportedReason.DOCKER_VERSION
             self.healthy = False
-            _LOGGER.critical(
-                "Docker version %s is not supported by Supervisor!",
+            _LOGGER.error(
+                "Docker version '%s' is not supported by Supervisor!",
                 self.sys_docker.info.version,
             )
         elif self.sys_docker.info.inside_lxc:
+            self.sys_resolution.unsupported = UnsupportedReason.LXC
             self.healthy = False
-            _LOGGER.critical(
-                "Detected Docker running inside LXC. Running Home Assistant with the Supervisor on LXC is not supported!"
+            _LOGGER.error(
+                "Detected Docker running inside LXC. Running Open Peer Power with the Supervisor on LXC is not supported!"
+            )
+        elif not self.sys_supervisor.instance.privileged:
+            self.sys_resolution.unsupported = UnsupportedReason.PRIVILEGED
+            self.healthy = False
+            _LOGGER.error("Supervisor does not run in Privileged mode.")
+
+        if self.sys_docker.info.check_requirements():
+            self.sys_resolution.unsupported = UnsupportedReason.DOCKER_CONFIGURATION
+
+        # Dbus available
+        if not SOCKET_DBUS.exists():
+            self.sys_resolution.unsupported = UnsupportedReason.DBUS
+            _LOGGER.error(
+                "D-Bus is required for Open Peer Power. This system is not supported!"
             )
 
-        self.sys_docker.info.check_requirements()
-
-        # Check if system is healthy
-        if not self.healthy:
-            _LOGGER.critical(
-                "System running in a unhealthy state. Please update you OS or software!"
+        # Check supervisor version/update
+        if self.sys_dev:
+            self.sys_config.version = self.sys_supervisor.version
+        elif self.sys_config.version != self.sys_supervisor.version:
+            self.sys_resolution.create_issue(
+                IssueType.UPDATE_ROLLBACK, ContextType.SUPERVISOR
+            )
+            self.healthy = False
+            _LOGGER.error(
+                "Update '%s' of Supervisor '%s' failed!",
+                self.sys_config.version,
+                self.sys_supervisor.version,
             )
 
     async def setup(self):
         """Start setting up supervisor orchestration."""
-        self.state = CoreStates.STARTUP
+        self.state = CoreState.SETUP
 
-        # Load DBus
-        await self.sys_dbus.load()
+        setup_loads: List[Awaitable[None]] = [
+            # rest api views
+            self.sys_api.load(),
+            # Load DBus
+            self.sys_dbus.load(),
+            # Load Host
+            self.sys_host.load(),
+            # Load Plugins container
+            self.sys_plugins.load(),
+            # load last available data
+            self.sys_updater.load(),
+            # Load Open Peer Power
+            self.sys_openpeerpower.load(),
+            # Load CPU/Arch
+            self.sys_arch.load(),
+            # Load OppOS
+            self.sys_oppos.load(),
+            # Load Stores
+            self.sys_store.load(),
+            # Load Add-ons
+            self.sys_addons.load(),
+            # load last available data
+            self.sys_snapshots.load(),
+            # load services
+            self.sys_services.load(),
+            # Load discovery
+            self.sys_discovery.load(),
+            # Load ingress
+            self.sys_ingress.load(),
+            # Load Resoulution
+            self.sys_resolution.load(),
+        ]
 
-        # Load Host
-        await self.sys_host.load()
+        # Execute each load task in secure context
+        for setup_task in setup_loads:
+            try:
+                await setup_task
+            except Exception as err:  # pylint: disable=broad-except
+                _LOGGER.critical(
+                    "Fatal error happening on load Task %s: %s", setup_task, err
+                )
+                self.healthy = False
+                self.sys_capture_exception(err)
 
-        # Load Plugins container
-        await self.sys_plugins.load()
+        # Check supported OS
+        if not self.sys_oppos.available:
+            if self.sys_host.info.operating_system not in SUPERVISED_SUPPORTED_OS:
+                self.sys_resolution.unsupported = UnsupportedReason.OS
+                _LOGGER.error(
+                    "Detected unsupported OS: %s",
+                    self.sys_host.info.operating_system,
+                )
 
-        # load last available data
-        await self.sys_updater.load()
+        # Check Host features
+        if HostFeature.NETWORK not in self.sys_host.supported_features:
+            self.sys_resolution.unsupported = UnsupportedReason.NETWORK_MANAGER
+            _LOGGER.error("NetworkManager is not correctly configured")
+        if any(
+            feature not in self.sys_host.supported_features
+            for feature in (
+                HostFeature.HOSTNAME,
+                HostFeature.SERVICES,
+                HostFeature.SHUTDOWN,
+                HostFeature.REBOOT,
+            )
+        ):
+            self.sys_resolution.unsupported = UnsupportedReason.SYSTEMD
+            _LOGGER.error("Systemd is not correctly working")
 
-        # Load Home Assistant
-        await self.sys_homeassistant.load()
-
-        # Load CPU/Arch
-        await self.sys_arch.load()
-
-        # Load HassOS
-        await self.sys_hassos.load()
-
-        # Load Stores
-        await self.sys_store.load()
-
-        # Load Add-ons
-        await self.sys_addons.load()
-
-        # rest api views
-        await self.sys_api.load()
-
-        # load last available data
-        await self.sys_snapshots.load()
-
-        # load services
-        await self.sys_services.load()
-
-        # Load discovery
-        await self.sys_discovery.load()
-
-        # Load ingress
-        await self.sys_ingress.load()
-
-        # Load secrets
-        await self.sys_secrets.load()
+        # Check if image names from denylist exist
+        try:
+            if await self.sys_run_in_executor(self.sys_docker.check_denylist_images):
+                self.sys_resolution.unsupported = UnsupportedReason.CONTAINER
+                self.healthy = False
+        except DockerError:
+            self.healthy = False
 
     async def start(self):
         """Start Supervisor orchestration."""
-        await self.sys_api.start()
+        self.state = CoreState.STARTUP
+
+        # Check if system is healthy
+        if not self.supported:
+            _LOGGER.warning("System running in a unsupported environment!")
+        if not self.healthy:
+            _LOGGER.critical(
+                "System running in a unhealthy state and need manual intervention!"
+            )
 
         # Mark booted partition as healthy
-        if self.sys_hassos.available:
-            await self.sys_hassos.mark_healthy()
+        if self.sys_oppos.available:
+            await self.sys_oppos.mark_healthy()
 
         # On release channel, try update itself
         if self.sys_supervisor.need_update:
             try:
-                if self.sys_dev or not self.healthy:
-                    _LOGGER.warning("Ignore Supervisor updates!")
+                if not self.healthy:
+                    _LOGGER.warning("Ignoring Supervisor updates!")
                 else:
                     await self.sys_supervisor.update()
-            except SupervisorUpdateError:
+                    return
+            except SupervisorUpdateError as err:
                 _LOGGER.critical(
-                    "Can't update supervisor! This will break some Add-ons or affect "
-                    "future version of Home Assistant!"
+                    "Can't update Supervisor! This will break some Add-ons or affect "
+                    "future version of Open Peer Power!"
                 )
+                self.sys_capture_exception(err)
 
         # Start addon mark as initialize
         await self.sys_addons.boot(AddonStartup.INITIALIZE)
@@ -129,7 +226,7 @@ class Core(CoreSysAttributes):
         try:
             # HomeAssistant is already running / supervisor have only reboot
             if self.sys_hardware.last_boot == self.sys_config.last_boot:
-                _LOGGER.info("Supervisor reboot detected")
+                _LOGGER.debug("Supervisor reboot detected")
                 return
 
             # reset register services / discovery
@@ -143,13 +240,21 @@ class Core(CoreSysAttributes):
 
             # run HomeAssistant
             if (
-                self.sys_homeassistant.boot
-                and not await self.sys_homeassistant.is_running()
+                self.sys_openpeerpower.boot
+                and not await self.sys_openpeerpower.core.is_running()
             ):
-                with suppress(HomeAssistantError):
-                    await self.sys_homeassistant.start()
+                try:
+                    await self.sys_openpeerpower.core.start()
+                except HomeAssistantCrashError as err:
+                    _LOGGER.error("Can't start Open Peer Power Core - rebuiling")
+                    self.sys_capture_exception(err)
+
+                    with suppress(HomeAssistantError):
+                        await self.sys_openpeerpower.core.rebuild()
+                except HomeAssistantError as err:
+                    self.sys_capture_exception(err)
             else:
-                _LOGGER.info("Skip start of Home Assistant")
+                _LOGGER.debug("Skiping start of Open Peer Power")
 
             # start addon mark as application
             await self.sys_addons.boot(AddonStartup.APPLICATION)
@@ -162,8 +267,8 @@ class Core(CoreSysAttributes):
             await self.sys_tasks.load()
 
             # If landingpage / run upgrade in background
-            if self.sys_homeassistant.version == "landingpage":
-                self.sys_create_task(self.sys_homeassistant.install())
+            if self.sys_openpeerpower.version == "landingpage":
+                self.sys_create_task(self.sys_openpeerpower.core.install())
 
             # Start observe the host Hardware
             await self.sys_hwmonitor.load()
@@ -172,48 +277,57 @@ class Core(CoreSysAttributes):
             self.sys_create_task(self.sys_host.reload())
             self.sys_create_task(self.sys_updater.reload())
 
+            self.state = CoreState.RUNNING
             _LOGGER.info("Supervisor is up and running")
-            self.state = CoreStates.RUNNING
 
     async def stop(self):
         """Stop a running orchestration."""
-        # don't process scheduler anymore
-        self.state = CoreStates.STOPPING
-
         # store new last boot / prevent time adjustments
-        if self.state == CoreStates.RUNNING:
+        if self.state in (CoreState.RUNNING, CoreState.SHUTDOWN):
             self._update_last_boot()
+        if self.state in (CoreState.STOPPING, CoreState.CLOSE):
+            return
 
-        # process async stop tasks
+        # don't process scheduler anymore
+        self.state = CoreState.STOPPING
+
+        # Stage 1
         try:
-            with async_timeout.timeout(10):
+            async with async_timeout.timeout(10):
+                await asyncio.wait([self.sys_api.stop(), self.sys_scheduler.shutdown()])
+        except asyncio.TimeoutError:
+            _LOGGER.warning("Stage 1: Force Shutdown!")
+
+        # Stage 2
+        try:
+            async with async_timeout.timeout(10):
                 await asyncio.wait(
                     [
-                        self.sys_api.stop(),
                         self.sys_websession.close(),
                         self.sys_websession_ssl.close(),
                         self.sys_ingress.unload(),
-                        self.sys_plugins.unload(),
                         self.sys_hwmonitor.unload(),
                     ]
                 )
         except asyncio.TimeoutError:
-            _LOGGER.warning("Force Shutdown!")
+            _LOGGER.warning("Stage 2: Force Shutdown!")
 
+        self.state = CoreState.CLOSE
         _LOGGER.info("Supervisor is down")
+        self.sys_loop.stop()
 
     async def shutdown(self):
         """Shutdown all running containers in correct order."""
         # don't process scheduler anymore
-        if self.state == CoreStates.RUNNING:
-            self.state = CoreStates.STOPPING
+        if self.state == CoreState.RUNNING:
+            self.state = CoreState.SHUTDOWN
 
-        # Shutdown Application Add-ons, using Home Assistant API
+        # Shutdown Application Add-ons, using Open Peer Power API
         await self.sys_addons.shutdown(AddonStartup.APPLICATION)
 
-        # Close Home Assistant
-        with suppress(HassioError):
-            await self.sys_homeassistant.stop()
+        # Close Open Peer Power
+        with suppress(OppioError):
+            await self.sys_openpeerpower.core.stop()
 
         # Shutdown System Add-ons
         await self.sys_addons.shutdown(AddonStartup.SERVICES)
@@ -221,7 +335,7 @@ class Core(CoreSysAttributes):
         await self.sys_addons.shutdown(AddonStartup.INITIALIZE)
 
         # Shutdown all Plugins
-        if self.state == CoreStates.STOPPING:
+        if self.state in (CoreState.STOPPING, CoreState.SHUTDOWN):
             await self.sys_plugins.shutdown()
 
     def _update_last_boot(self):
@@ -231,7 +345,7 @@ class Core(CoreSysAttributes):
 
     async def repair(self):
         """Repair system integrity."""
-        _LOGGER.info("Start repairing of Supervisor Environment")
+        _LOGGER.info("Starting repair of Supervisor Environment")
         await self.sys_run_in_executor(self.sys_docker.repair)
 
         # Fix plugins
@@ -239,8 +353,8 @@ class Core(CoreSysAttributes):
 
         # Restore core functionality
         await self.sys_addons.repair()
-        await self.sys_homeassistant.repair()
+        await self.sys_openpeerpower.core.repair()
 
         # Tag version for latest
         await self.sys_supervisor.repair()
-        _LOGGER.info("Finished repairing of Supervisor Environment")
+        _LOGGER.info("Finished repair of Supervisor Environment")

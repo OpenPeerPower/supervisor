@@ -1,6 +1,5 @@
 """Init file for Supervisor util for RESTful API."""
 import json
-import logging
 from typing import Any, Dict, List, Optional
 
 from aiohttp import web
@@ -18,9 +17,9 @@ from ..const import (
     RESULT_ERROR,
     RESULT_OK,
 )
-from ..exceptions import APIError, APIForbidden, HassioError
-
-_LOGGER: logging.Logger = logging.getLogger(__name__)
+from ..exceptions import APIError, APIForbidden, DockerAPIError, OppioError
+from ..utils import check_exception_chain, get_message_from_exception_chain
+from ..utils.log_format import format_message
 
 
 def excract_supervisor_token(request: web.Request) -> Optional[str]:
@@ -48,8 +47,8 @@ def json_loads(data: Any) -> Dict[str, Any]:
         return {}
     try:
         return json.loads(data)
-    except json.JSONDecodeError:
-        raise APIError("Invalid json")
+    except json.JSONDecodeError as err:
+        raise APIError("Invalid json") from err
 
 
 def api_process(method):
@@ -59,10 +58,8 @@ def api_process(method):
         """Return API information."""
         try:
             answer = await method(api, *args, **kwargs)
-        except (APIError, APIForbidden) as err:
-            return api_return_error(message=str(err))
-        except HassioError:
-            return api_return_error(message="Unknown Error, see logs")
+        except (APIError, APIForbidden, OppioError) as err:
+            return api_return_error(error=err)
 
         if isinstance(answer, dict):
             return api_return_ok(data=answer)
@@ -89,7 +86,7 @@ def api_process_raw(content):
             except (APIError, APIForbidden) as err:
                 msg_data = str(err).encode()
                 msg_type = CONTENT_TYPE_BINARY
-            except HassioError:
+            except OppioError:
                 msg_data = b""
                 msg_type = CONTENT_TYPE_BINARY
 
@@ -100,10 +97,21 @@ def api_process_raw(content):
     return wrap_method
 
 
-def api_return_error(message: Optional[str] = None) -> web.Response:
+def api_return_error(
+    error: Optional[Exception] = None, message: Optional[str] = None
+) -> web.Response:
     """Return an API error message."""
+    if error and not message:
+        message = get_message_from_exception_chain(error)
+        if check_exception_chain(error, DockerAPIError):
+            message = format_message(message)
+
     return web.json_response(
-        {JSON_RESULT: RESULT_ERROR, JSON_MESSAGE: message}, status=400
+        {
+            JSON_RESULT: RESULT_ERROR,
+            JSON_MESSAGE: message or "Unknown error, see supervisor",
+        },
+        status=400,
     )
 
 

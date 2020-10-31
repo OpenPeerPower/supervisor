@@ -3,19 +3,20 @@ from datetime import datetime
 import logging
 import os
 from pathlib import Path, PurePath
-from typing import List
+from typing import List, Optional
 
 from .const import (
     ATTR_ADDONS_CUSTOM_LIST,
     ATTR_DEBUG,
     ATTR_DEBUG_BLOCK,
+    ATTR_DIAGNOSTICS,
     ATTR_LAST_BOOT,
     ATTR_LOGGING,
     ATTR_TIMEZONE,
     ATTR_VERSION,
     ATTR_WAIT_BOOT,
     ENV_SUPERVISOR_SHARE,
-    FILE_HASSIO_CONFIG,
+    FILE_OPPIO_CONFIG,
     SUPERVISOR_DATA,
     LogLevel,
 )
@@ -25,9 +26,9 @@ from .validate import SCHEMA_SUPERVISOR_CONFIG
 
 _LOGGER: logging.Logger = logging.getLogger(__name__)
 
-HOMEASSISTANT_CONFIG = PurePath("homeassistant")
+HOMEASSISTANT_CONFIG = PurePath("openpeerpower")
 
-HASSIO_SSL = PurePath("ssl")
+OPPIO_SSL = PurePath("ssl")
 
 ADDONS_CORE = PurePath("addons/core")
 ADDONS_LOCAL = PurePath("addons/local")
@@ -40,6 +41,7 @@ TMP_DATA = PurePath("tmp")
 APPARMOR_DATA = PurePath("apparmor")
 DNS_DATA = PurePath("dns")
 AUDIO_DATA = PurePath("audio")
+MEDIA_DATA = PurePath("media")
 
 DEFAULT_BOOT_TIME = datetime.utcfromtimestamp(0).isoformat()
 
@@ -49,7 +51,7 @@ class CoreConfig(JsonConfig):
 
     def __init__(self):
         """Initialize config object."""
-        super().__init__(FILE_HASSIO_CONFIG, SCHEMA_SUPERVISOR_CONFIG)
+        super().__init__(FILE_OPPIO_CONFIG, SCHEMA_SUPERVISOR_CONFIG)
 
     @property
     def timezone(self) -> str:
@@ -102,6 +104,16 @@ class CoreConfig(JsonConfig):
         self._data[ATTR_DEBUG_BLOCK] = value
 
     @property
+    def diagnostics(self) -> Optional[bool]:
+        """Return bool if diagnostics is set otherwise None."""
+        return self._data[ATTR_DIAGNOSTICS]
+
+    @diagnostics.setter
+    def diagnostics(self, value: bool) -> None:
+        """Set diagnostics settings."""
+        self._data[ATTR_DIAGNOSTICS] = value
+
+    @property
     def logging(self) -> LogLevel:
         """Return log level of system."""
         return self._data[ATTR_LOGGING]
@@ -143,24 +155,24 @@ class CoreConfig(JsonConfig):
         return PurePath(os.environ[ENV_SUPERVISOR_SHARE])
 
     @property
-    def path_extern_homeassistant(self) -> str:
+    def path_extern_openpeerpower(self) -> str:
         """Return config path external for Docker."""
         return str(PurePath(self.path_extern_supervisor, HOMEASSISTANT_CONFIG))
 
     @property
-    def path_homeassistant(self) -> Path:
+    def path_openpeerpower(self) -> Path:
         """Return config path inside supervisor."""
         return Path(SUPERVISOR_DATA, HOMEASSISTANT_CONFIG)
 
     @property
     def path_extern_ssl(self) -> str:
         """Return SSL path external for Docker."""
-        return str(PurePath(self.path_extern_supervisor, HASSIO_SSL))
+        return str(PurePath(self.path_extern_supervisor, OPPIO_SSL))
 
     @property
     def path_ssl(self) -> Path:
         """Return SSL path inside supervisor."""
-        return Path(SUPERVISOR_DATA, HASSIO_SSL)
+        return Path(SUPERVISOR_DATA, OPPIO_SSL)
 
     @property
     def path_addons_core(self) -> Path:
@@ -246,6 +258,16 @@ class CoreConfig(JsonConfig):
     def path_dns(self) -> Path:
         """Return dns path inside supervisor."""
         return Path(SUPERVISOR_DATA, DNS_DATA)
+
+    @property
+    def path_media(self) -> Path:
+        """Return root media data folder."""
+        return Path(SUPERVISOR_DATA, MEDIA_DATA)
+
+    @property
+    def path_extern_media(self) -> PurePath:
+        """Return root media data folder external for Docker."""
+        return PurePath(self.path_extern_supervisor, MEDIA_DATA)
 
     @property
     def addons_repositories(self) -> List[str]:

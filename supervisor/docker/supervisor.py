@@ -5,9 +5,10 @@ import os
 from typing import Awaitable
 
 import docker
+import requests
 
 from ..coresys import CoreSysAttributes
-from ..exceptions import DockerAPIError
+from ..exceptions import DockerError
 from .interface import DockerInterface
 
 _LOGGER: logging.Logger = logging.getLogger(__name__)
@@ -38,12 +39,12 @@ class DockerSupervisor(DockerInterface, CoreSysAttributes):
         """
         try:
             docker_container = self.sys_docker.containers.get(self.name)
-        except docker.errors.DockerException:
-            raise DockerAPIError() from None
+        except (docker.errors.DockerException, requests.RequestException) as err:
+            raise DockerError() from err
 
         self._meta = docker_container.attrs
         _LOGGER.info(
-            "Attach to Supervisor %s with version %s",
+            "Attaching to Supervisor %s with version %s",
             self.image,
             self.sys_supervisor.version,
         )
@@ -53,7 +54,7 @@ class DockerSupervisor(DockerInterface, CoreSysAttributes):
             return
 
         # Attach to network
-        _LOGGER.info("Connect Supervisor to hassio Network")
+        _LOGGER.info("Connecting Supervisor to oppio-network")
         self.sys_docker.network.attach_container(
             docker_container,
             alias=["supervisor"],
@@ -74,9 +75,9 @@ class DockerSupervisor(DockerInterface, CoreSysAttributes):
 
             docker_container.image.tag(self.image, tag=self.version)
             docker_container.image.tag(self.image, tag="latest")
-        except docker.errors.DockerException as err:
-            _LOGGER.error("Can't retag supervisor version: %s", err)
-            raise DockerAPIError() from None
+        except (docker.errors.DockerException, requests.RequestException) as err:
+            _LOGGER.error("Can't retag Supervisor version: %s", err)
+            raise DockerError() from err
 
     def update_start_tag(self, image: str, version: str) -> Awaitable[None]:
         """Update start tag to new version."""
@@ -101,6 +102,6 @@ class DockerSupervisor(DockerInterface, CoreSysAttributes):
                     continue
                 docker_image.tag(start_image, start_tag)
 
-        except docker.errors.DockerException as err:
+        except (docker.errors.DockerException, requests.RequestException) as err:
             _LOGGER.error("Can't fix start tag: %s", err)
-            raise DockerAPIError() from None
+            raise DockerError() from err

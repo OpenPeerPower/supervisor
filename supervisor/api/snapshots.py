@@ -2,9 +2,11 @@
 import asyncio
 import logging
 from pathlib import Path
+import re
 from tempfile import TemporaryDirectory
 
 from aiohttp import web
+from aiohttp.hdrs import CONTENT_DISPOSITION
 import voluptuous as vol
 
 from ..const import (
@@ -30,6 +32,7 @@ from .utils import api_process, api_validate
 
 _LOGGER: logging.Logger = logging.getLogger(__name__)
 
+RE_SLUGIFY_NAME = re.compile(r"[^A-Za-z0-9]+")
 
 # pylint: disable=no-value-for-parameter
 SCHEMA_RESTORE_PARTIAL = vol.Schema(
@@ -116,7 +119,7 @@ class APISnapshots(CoreSysAttributes):
             ATTR_DATE: snapshot.date,
             ATTR_SIZE: snapshot.size,
             ATTR_PROTECTED: snapshot.protected,
-            ATTR_HOMEASSISTANT: snapshot.homeassistant_version,
+            ATTR_HOMEASSISTANT: snapshot.openpeerpower_version,
             ATTR_ADDONS: data_addons,
             ATTR_REPOSITORIES: snapshot.repositories,
             ATTR_FOLDERS: snapshot.folders,
@@ -172,9 +175,12 @@ class APISnapshots(CoreSysAttributes):
         """Download a snapshot file."""
         snapshot = self._extract_snapshot(request)
 
-        _LOGGER.info("Download snapshot %s", snapshot.slug)
+        _LOGGER.info("Downloading snapshot %s", snapshot.slug)
         response = web.FileResponse(snapshot.tarfile)
         response.content_type = CONTENT_TYPE_TAR
+        response.headers[
+            CONTENT_DISPOSITION
+        ] = f"attachment; filename={RE_SLUGIFY_NAME.sub('_', snapshot.name)}.tar"
         return response
 
     @api_process
@@ -182,11 +188,15 @@ class APISnapshots(CoreSysAttributes):
         """Upload a snapshot file."""
         with TemporaryDirectory(dir=str(self.sys_config.path_tmp)) as temp_dir:
             tar_file = Path(temp_dir, "snapshot.tar")
-
+            reader = await request.multipart()
+            contents = await reader.next()
             try:
                 with tar_file.open("wb") as snapshot:
-                    async for data in request.content.iter_any():
-                        snapshot.write(data)
+                    while True:
+                        chunk = await contents.read_chunk()
+                        if not chunk:
+                            break
+                        snapshot.write(chunk)
 
             except OSError as err:
                 _LOGGER.error("Can't write new snapshot file: %s", err)
@@ -199,6 +209,6 @@ class APISnapshots(CoreSysAttributes):
                 self.sys_snapshots.import_snapshot(tar_file)
             )
 
-            if snapshot:
-                return {ATTR_SLUG: snapshot.slug}
-            return False
+        if snapshot:
+            return {ATTR_SLUG: snapshot.slug}
+        return False

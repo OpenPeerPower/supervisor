@@ -59,7 +59,7 @@ class APIAuth(CoreSysAttributes):
         addon = request[REQUEST_FROM]
 
         if not addon.access_auth_api:
-            raise APIForbidden("Can't use Home Assistant auth!")
+            raise APIForbidden("Can't use Open Peer Power auth!")
 
         # BasicAuth
         if AUTHORIZATION in request.headers:
@@ -76,7 +76,7 @@ class APIAuth(CoreSysAttributes):
             return await self._process_dict(request, addon, data)
 
         raise HTTPUnauthorized(
-            headers={WWW_AUTHENTICATE: 'Basic realm="Home Assistant Authentication"'}
+            headers={WWW_AUTHENTICATE: 'Basic realm="Open Peer Power Authentication"'}
         )
 
     @api_process
@@ -86,3 +86,8 @@ class APIAuth(CoreSysAttributes):
         await asyncio.shield(
             self.sys_auth.change_password(body[ATTR_USERNAME], body[ATTR_PASSWORD])
         )
+
+    @api_process
+    async def cache(self, request: web.Request) -> None:
+        """Process cache reset request."""
+        self.sys_auth.reset_data()

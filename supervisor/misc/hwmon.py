@@ -28,6 +28,7 @@ class HwMonitor(CoreSysAttributes):
             self.monitor = pyudev.Monitor.from_netlink(self.context)
             self.observer = pyudev.MonitorObserver(self.monitor, self._udev_events)
         except OSError:
+            self.sys_core.healthy = False
             _LOGGER.critical("Not privileged to run udev monitor!")
         else:
             self.observer.start()
@@ -39,7 +40,7 @@ class HwMonitor(CoreSysAttributes):
             return
 
         self.observer.stop()
-        _LOGGER.info("Stop Supervisor hardware monitor")
+        _LOGGER.info("Stopped Supervisor hardware monitor")
 
     def _udev_events(self, action: str, device: pyudev.Device):
         """Incomming events from udev.
@@ -58,5 +59,5 @@ class HwMonitor(CoreSysAttributes):
     @AsyncCallFilter(timedelta(seconds=5))
     def _action_sound(self, device: pyudev.Device):
         """Process sound actions."""
-        _LOGGER.info("Detect changed audio hardware")
+        _LOGGER.info("Detecting changed audio hardware")
         self.sys_loop.call_later(5, self.sys_create_task, self.sys_host.sound.update())

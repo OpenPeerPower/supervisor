@@ -25,6 +25,7 @@ from ..const import (
     ATTR_NETWORK_RX,
     ATTR_NETWORK_TX,
     ATTR_OUTPUT,
+    ATTR_UPDATE_AVAILABLE,
     ATTR_VERSION,
     ATTR_VERSION_LATEST,
     ATTR_VOLUME,
@@ -33,12 +34,12 @@ from ..const import (
 from ..coresys import CoreSysAttributes
 from ..exceptions import APIError
 from ..host.sound import StreamType
-from ..validate import simple_version
+from ..validate import version_tag
 from .utils import api_process, api_process_raw, api_validate
 
 _LOGGER: logging.Logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = vol.Schema({vol.Optional(ATTR_VERSION): simple_version})
+SCHEMA_VERSION = vol.Schema({vol.Optional(ATTR_VERSION): version_tag})
 
 SCHEMA_VOLUME = vol.Schema(
     {
@@ -71,6 +72,7 @@ class APIAudio(CoreSysAttributes):
         return {
             ATTR_VERSION: self.sys_plugins.audio.version,
             ATTR_VERSION_LATEST: self.sys_plugins.audio.latest_version,
+            ATTR_UPDATE_AVAILABLE: self.sys_plugins.audio.need_update,
             ATTR_HOST: str(self.sys_docker.network.audio),
             ATTR_AUDIO: {
                 ATTR_CARD: [attr.asdict(card) for card in self.sys_host.sound.cards],

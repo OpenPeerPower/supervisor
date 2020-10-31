@@ -18,13 +18,14 @@ from ..const import (
     ATTR_NETWORK_RX,
     ATTR_NETWORK_TX,
     ATTR_SERVERS,
+    ATTR_UPDATE_AVAILABLE,
     ATTR_VERSION,
     ATTR_VERSION_LATEST,
     CONTENT_TYPE_BINARY,
 )
 from ..coresys import CoreSysAttributes
 from ..exceptions import APIError
-from ..validate import dns_server_list, simple_version
+from ..validate import dns_server_list, version_tag
 from .utils import api_process, api_process_raw, api_validate
 
 _LOGGER: logging.Logger = logging.getLogger(__name__)
@@ -32,7 +33,7 @@ _LOGGER: logging.Logger = logging.getLogger(__name__)
 # pylint: disable=no-value-for-parameter
 SCHEMA_OPTIONS = vol.Schema({vol.Optional(ATTR_SERVERS): dns_server_list})
 
-SCHEMA_VERSION = vol.Schema({vol.Optional(ATTR_VERSION): simple_version})
+SCHEMA_VERSION = vol.Schema({vol.Optional(ATTR_VERSION): version_tag})
 
 
 class APICoreDNS(CoreSysAttributes):
@@ -44,9 +45,10 @@ class APICoreDNS(CoreSysAttributes):
         return {
             ATTR_VERSION: self.sys_plugins.dns.version,
             ATTR_VERSION_LATEST: self.sys_plugins.dns.latest_version,
+            ATTR_UPDATE_AVAILABLE: self.sys_plugins.dns.need_update,
             ATTR_HOST: str(self.sys_docker.network.dns),
             ATTR_SERVERS: self.sys_plugins.dns.servers,
-            ATTR_LOCALS: self.sys_host.network.dns_servers,
+            ATTR_LOCALS: self.sys_plugins.dns.locals,
         }
 
     @api_process

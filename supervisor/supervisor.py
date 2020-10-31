@@ -1,4 +1,4 @@
-"""Home Assistant control object."""
+"""Open Peer Power control object."""
 import asyncio
 from contextlib import suppress
 from ipaddress import IPv4Address
@@ -8,44 +8,40 @@ from tempfile import TemporaryDirectory
 from typing import Awaitable, Optional
 
 import aiohttp
+from packaging.version import parse as pkg_parse
 
-from .const import SUPERVISOR_VERSION, URL_HASSIO_APPARMOR
+from .const import SUPERVISOR_VERSION, URL_OPPIO_APPARMOR
 from .coresys import CoreSys, CoreSysAttributes
 from .docker.stats import DockerStats
 from .docker.supervisor import DockerSupervisor
 from .exceptions import (
-    DockerAPIError,
+    DockerError,
     HostAppArmorError,
     SupervisorError,
     SupervisorUpdateError,
 )
+from .resolution.const import ContextType, IssueType
 
 _LOGGER: logging.Logger = logging.getLogger(__name__)
 
 
 class Supervisor(CoreSysAttributes):
-    """Home Assistant core object for handle it."""
+    """Open Peer Power core object for handle it."""
 
     def __init__(self, coresys: CoreSys):
-        """Initialize hass object."""
+        """Initialize opp object."""
         self.coresys: CoreSys = coresys
         self.instance: DockerSupervisor = DockerSupervisor(coresys)
 
     async def load(self) -> None:
-        """Prepare Home Assistant object."""
+        """Prepare Open Peer Power object."""
         try:
             await self.instance.attach(tag="latest")
-        except DockerAPIError:
+        except DockerError:
             _LOGGER.critical("Can't setup Supervisor Docker container!")
 
-        with suppress(DockerAPIError):
+        with suppress(DockerError):
             await self.instance.cleanup()
-
-        # Check privileged mode
-        if not self.instance.privileged:
-            _LOGGER.error(
-                "Supervisor does not run in Privileged mode. Hassio runs with limited functionality!"
-            )
 
     @property
     def ip_address(self) -> IPv4Address:
@@ -55,21 +51,27 @@ class Supervisor(CoreSysAttributes):
     @property
     def need_update(self) -> bool:
         """Return True if an update is available."""
-        return self.version != self.latest_version
+        if self.sys_dev:
+            return False
+
+        try:
+            return pkg_parse(self.version) < pkg_parse(self.latest_version)
+        except (TypeError, ValueError):
+            return True
 
     @property
     def version(self) -> str:
-        """Return version of running Home Assistant."""
+        """Return version of running Open Peer Power."""
         return SUPERVISOR_VERSION
 
     @property
     def latest_version(self) -> str:
-        """Return last available version of Home Assistant."""
+        """Return last available version of Open Peer Power."""
         return self.sys_updater.version_supervisor
 
     @property
     def image(self) -> str:
-        """Return image name of Home Assistant container."""
+        """Return image name of Open Peer Power container."""
         return self.instance.image
 
     @property
@@ -79,15 +81,15 @@ class Supervisor(CoreSysAttributes):
 
     async def update_apparmor(self) -> None:
         """Fetch last version and update profile."""
-        url = URL_HASSIO_APPARMOR
+        url = URL_OPPIO_APPARMOR
         try:
-            _LOGGER.info("Fetch AppArmor profile %s", url)
+            _LOGGER.info("Fetching AppArmor profile %s", url)
             async with self.sys_websession.get(url, timeout=10) as request:
                 data = await request.text()
 
         except (aiohttp.ClientError, asyncio.TimeoutError) as err:
             _LOGGER.warning("Can't fetch AppArmor profile: %s", err)
-            raise SupervisorError() from None
+            raise SupervisorError() from err
 
         with TemporaryDirectory(dir=self.sys_config.path_tmp) as tmp_dir:
             profile_file = Path(tmp_dir, "apparmor.txt")
@@ -95,18 +97,18 @@ class Supervisor(CoreSysAttributes):
                 profile_file.write_text(data)
             except OSError as err:
                 _LOGGER.error("Can't write temporary profile: %s", err)
-                raise SupervisorError() from None
+                raise SupervisorError() from err
 
             try:
                 await self.sys_host.apparmor.load_profile(
-                    "hassio-supervisor", profile_file
+                    "oppio-supervisor", profile_file
                 )
-            except HostAppArmorError:
+            except HostAppArmorError as err:
                 _LOGGER.error("Can't update AppArmor profile!")
-                raise SupervisorError() from None
+                raise SupervisorError() from err
 
     async def update(self, version: Optional[str] = None) -> None:
-        """Update Home Assistant version."""
+        """Update Open Peer Power version."""
         version = version or self.latest_version
 
         if version == self.sys_supervisor.version:
@@ -121,16 +123,19 @@ class Supervisor(CoreSysAttributes):
             await self.instance.update_start_tag(
                 self.sys_updater.image_supervisor, version
             )
-        except DockerAPIError:
-            _LOGGER.error("Update of Supervisor fails!")
-            raise SupervisorUpdateError() from None
+        except DockerError as err:
+            _LOGGER.error("Update of Supervisor failed!")
+            self.sys_resolution.create_issue(
+                IssueType.UPDATE_FAILED, ContextType.SUPERVISOR
+            )
+            raise SupervisorUpdateError() from err
         else:
             self.sys_config.version = version
             self.sys_config.save_data()
 
         with suppress(SupervisorError):
             await self.update_apparmor()
-        self.sys_loop.call_later(5, self.sys_loop.stop)
+        self.sys_create_task(self.sys_core.stop())
 
     @property
     def in_progress(self) -> bool:
@@ -148,16 +153,16 @@ class Supervisor(CoreSysAttributes):
         """Return stats of Supervisor."""
         try:
             return await self.instance.stats()
-        except DockerAPIError:
-            raise SupervisorError() from None
+        except DockerError as err:
+            raise SupervisorError() from err
 
     async def repair(self):
         """Repair local Supervisor data."""
         if await self.instance.exists():
             return
 
-        _LOGGER.info("Repair Supervisor %s", self.version)
+        _LOGGER.info("Repairing Supervisor %s", self.version)
         try:
             await self.instance.retag()
-        except DockerAPIError:
-            _LOGGER.error("Repairing of Supervisor fails")
+        except DockerError:
+            _LOGGER.error("Repair of Supervisor failed")

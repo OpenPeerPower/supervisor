@@ -1,6 +1,6 @@
-"""Home Assistant cli plugin.
+"""Open Peer Power cli plugin.
 
-Code: https://github.com/home-assistant/plugin-cli
+Code: https://github.com/open-peer-power/plugin-cli
 """
 import asyncio
 from contextlib import suppress
@@ -8,12 +8,15 @@ import logging
 import secrets
 from typing import Awaitable, Optional
 
-from ..const import ATTR_ACCESS_TOKEN, ATTR_IMAGE, ATTR_VERSION, FILE_HASSIO_CLI
+from packaging.version import parse as pkg_parse
+
+from ..const import ATTR_ACCESS_TOKEN, ATTR_IMAGE, ATTR_VERSION
 from ..coresys import CoreSys, CoreSysAttributes
 from ..docker.cli import DockerCli
 from ..docker.stats import DockerStats
-from ..exceptions import CliError, CliUpdateError, DockerAPIError
+from ..exceptions import CliError, CliUpdateError, DockerError
 from ..utils.json import JsonConfig
+from .const import FILE_OPPIO_CLI
 from .validate import SCHEMA_CLI_CONFIG
 
 _LOGGER: logging.Logger = logging.getLogger(__name__)
@@ -22,9 +25,11 @@ _LOGGER: logging.Logger = logging.getLogger(__name__)
 class HaCli(CoreSysAttributes, JsonConfig):
     """HA cli interface inside supervisor."""
 
+    slug: str = "cli"
+
     def __init__(self, coresys: CoreSys):
         """Initialize cli handler."""
-        super().__init__(FILE_HASSIO_CLI, SCHEMA_CLI_CONFIG)
+        super().__init__(FILE_OPPIO_CLI, SCHEMA_CLI_CONFIG)
         self.coresys: CoreSys = coresys
         self.instance: DockerCli = DockerCli(coresys)
 
@@ -43,7 +48,7 @@ class HaCli(CoreSysAttributes, JsonConfig):
         """Return current image of cli."""
         if self._data.get(ATTR_IMAGE):
             return self._data[ATTR_IMAGE]
-        return f"homeassistant/{self.sys_arch.supervisor}-hassio-cli"
+        return f"openpeerpower/{self.sys_arch.supervisor}-oppio-cli"
 
     @image.setter
     def image(self, value: str) -> None:
@@ -58,7 +63,10 @@ class HaCli(CoreSysAttributes, JsonConfig):
     @property
     def need_update(self) -> bool:
         """Return true if a cli update is available."""
-        return self.version != self.latest_version
+        try:
+            return pkg_parse(self.version) < pkg_parse(self.latest_version)
+        except (TypeError, ValueError):
+            return True
 
     @property
     def supervisor_token(self) -> str:
@@ -76,10 +84,10 @@ class HaCli(CoreSysAttributes, JsonConfig):
         try:
             # Evaluate Version if we lost this information
             if not self.version:
-                self.version = await self.instance.get_latest_version(key=int)
+                self.version = await self.instance.get_latest_version()
 
             await self.instance.attach(tag=self.version)
-        except DockerAPIError:
+        except DockerError:
             _LOGGER.info("No cli plugin Docker image %s found.", self.instance.image)
 
             # Install cli
@@ -90,31 +98,30 @@ class HaCli(CoreSysAttributes, JsonConfig):
             self.image = self.instance.image
             self.save_data()
 
-        # Run PulseAudio
+        # Run CLI
         with suppress(CliError):
             if not await self.instance.is_running():
                 await self.start()
 
     async def install(self) -> None:
         """Install cli."""
-        _LOGGER.info("Setup cli plugin")
+        _LOGGER.info("Running setup for CLI plugin")
         while True:
             # read audio tag and install it
             if not self.latest_version:
                 await self.sys_updater.reload()
 
             if self.latest_version:
-                with suppress(DockerAPIError):
+                with suppress(DockerError):
                     await self.instance.install(
                         self.latest_version,
                         image=self.sys_updater.image_cli,
-                        latest=True,
                     )
                     break
             _LOGGER.warning("Error on install cli plugin. Retry in 30sec")
             await asyncio.sleep(30)
 
-        _LOGGER.info("cli plugin now installed")
+        _LOGGER.info("CLI plugin is now installed")
         self.version = self.instance.version
         self.image = self.sys_updater.image_cli
         self.save_data()
@@ -125,23 +132,21 @@ class HaCli(CoreSysAttributes, JsonConfig):
         old_image = self.image
 
         if version == self.version:
-            _LOGGER.warning("Version %s is already installed for cli", version)
+            _LOGGER.warning("Version %s is already installed for CLI", version)
             return
 
         try:
-            await self.instance.update(
-                version, image=self.sys_updater.image_cli, latest=True
-            )
-        except DockerAPIError:
-            _LOGGER.error("HA cli update fails")
-            raise CliUpdateError() from None
+            await self.instance.update(version, image=self.sys_updater.image_cli)
+        except DockerError as err:
+            _LOGGER.error("CLI update failed")
+            raise CliUpdateError() from err
         else:
             self.version = version
             self.image = self.sys_updater.image_cli
             self.save_data()
 
         # Cleanup
-        with suppress(DockerAPIError):
+        with suppress(DockerError):
             await self.instance.cleanup(old_image=old_image)
 
         # Start cli
@@ -154,28 +159,28 @@ class HaCli(CoreSysAttributes, JsonConfig):
         self.save_data()
 
         # Start Instance
-        _LOGGER.info("Start cli plugin")
+        _LOGGER.info("Starting CLI plugin")
         try:
             await self.instance.run()
-        except DockerAPIError:
+        except DockerError as err:
             _LOGGER.error("Can't start cli plugin")
-            raise CliError() from None
+            raise CliError() from err
 
     async def stop(self) -> None:
         """Stop cli."""
-        _LOGGER.info("Stop cli plugin")
+        _LOGGER.info("Stopping cli plugin")
         try:
             await self.instance.stop()
-        except DockerAPIError:
+        except DockerError as err:
             _LOGGER.error("Can't stop cli plugin")
-            raise CliError() from None
+            raise CliError() from err
 
     async def stats(self) -> DockerStats:
         """Return stats of cli."""
         try:
             return await self.instance.stats()
-        except DockerAPIError:
-            raise CliError() from None
+        except DockerError as err:
+            raise CliError() from err
 
     def is_running(self) -> Awaitable[bool]:
         """Return True if Docker container is running.
@@ -189,8 +194,9 @@ class HaCli(CoreSysAttributes, JsonConfig):
         if await self.instance.exists():
             return
 
-        _LOGGER.info("Repair HA cli %s", self.version)
+        _LOGGER.info("Repairing HA cli %s", self.version)
         try:
-            await self.instance.install(self.version, latest=True)
-        except DockerAPIError:
-            _LOGGER.error("Repairing of HA cli fails")
+            await self.instance.install(self.version)
+        except DockerError as err:
+            _LOGGER.error("Repair of HA cli failed")
+            self.sys_capture_exception(err)

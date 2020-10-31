@@ -2,7 +2,7 @@
 import logging
 import re
 
-from aiohttp.web import middleware
+from aiohttp.web import Request, RequestHandler, Response, middleware
 from aiohttp.web_exceptions import HTTPForbidden, HTTPUnauthorized
 
 from ..const import (
@@ -12,9 +12,10 @@ from ..const import (
     ROLE_DEFAULT,
     ROLE_HOMEASSISTANT,
     ROLE_MANAGER,
+    CoreState,
 )
-from ..coresys import CoreSysAttributes
-from .utils import excract_supervisor_token
+from ..coresys import CoreSys, CoreSysAttributes
+from .utils import api_return_error, excract_supervisor_token
 
 _LOGGER: logging.Logger = logging.getLogger(__name__)
 
@@ -23,19 +24,26 @@ _LOGGER: logging.Logger = logging.getLogger(__name__)
 # Block Anytime
 BLACKLIST = re.compile(
     r"^(?:"
-    r"|/homeassistant/api/hassio/.*"
-    r"|/core/api/hassio/.*"
+    r"|/openpeerpower/api/oppio/.*"
+    r"|/core/api/oppio/.*"
     r")$"
 )
 
 # Free to call or have own security concepts
 NO_SECURITY_CHECK = re.compile(
     r"^(?:"
-    r"|/homeassistant/api/.*"
-    r"|/homeassistant/websocket"
+    r"|/openpeerpower/api/.*"
+    r"|/openpeerpower/websocket"
     r"|/core/api/.*"
     r"|/core/websocket"
     r"|/supervisor/ping"
+    r")$"
+)
+
+# Observer allow API calls
+OBSERVER_CHECK = re.compile(
+    r"^(?:"
+    r"|/[^/]+/info"
     r")$"
 )
 
@@ -43,7 +51,6 @@ NO_SECURITY_CHECK = re.compile(
 ADDONS_API_BYPASS = re.compile(
     r"^(?:"
     r"|/addons/self/(?!security|update)[^/]+"
-    r"|/secrets/.+"
     r"|/info"
     r"|/hardware/trigger"
     r"|/services.*"
@@ -63,7 +70,7 @@ ADDONS_ROLE_ACCESS = {
     ROLE_HOMEASSISTANT: re.compile(
         r"^(?:"
         r"|/core/.+"
-        r"|/homeassistant/.+"
+        r"|/openpeerpower/.+"
         r")$"
     ),
     ROLE_BACKUP: re.compile(
@@ -73,19 +80,24 @@ ADDONS_ROLE_ACCESS = {
     ),
     ROLE_MANAGER: re.compile(
         r"^(?:"
-        r"|/audio/.*"
-        r"|/dns/.*"
-        r"|/cli/.*"
-        r"|/multicast/.*"
-        r"|/core/.+"
-        r"|/homeassistant/.+"
-        r"|/host/.+"
-        r"|/hardware/.+"
-        r"|/os/.+"
-        r"|/hassos/.+"
-        r"|/supervisor/.+"
         r"|/addons(?:/[^/]+/(?!security).+|/reload)?"
+        r"|/audio/.+"
+        r"|/auth/cache"
+        r"|/cli/.+"
+        r"|/core/.+"
+        r"|/dns/.+"
+        r"|/docker/.+"
+        r"|/hardware/.+"
+        r"|/oppos/.+"
+        r"|/openpeerpower/.+"
+        r"|/host/.+"
+        r"|/multicast/.+"
+        r"|/network/.+"
+        r"|/observer/.+"
+        r"|/os/.+"
+        r"|/resolution/.+"
         r"|/snapshots.*"
+        r"|/supervisor/.+"
         r")$"
     ),
     ROLE_ADMIN: re.compile(
@@ -93,25 +105,43 @@ ADDONS_ROLE_ACCESS = {
     ),
 }
 
-# fmt: off
+# fmt: on
 
 
 class SecurityMiddleware(CoreSysAttributes):
     """Security middleware functions."""
 
-    def __init__(self, coresys):
+    def __init__(self, coresys: CoreSys):
         """Initialize security middleware."""
-        self.coresys = coresys
+        self.coresys: CoreSys = coresys
 
     @middleware
-    async def token_validation(self, request, handler):
+    async def system_validation(
+        self, request: Request, handler: RequestHandler
+    ) -> Response:
+        """Check if core is ready to response."""
+        if self.sys_core.state not in (
+            CoreState.STARTUP,
+            CoreState.RUNNING,
+            CoreState.FREEZE,
+        ):
+            return api_return_error(
+                message=f"System is not ready with state: {self.sys_core.state.value}"
+            )
+
+        return await handler(request)
+
+    @middleware
+    async def token_validation(
+        self, request: Request, handler: RequestHandler
+    ) -> Response:
         """Check security access of this layer."""
         request_from = None
         supervisor_token = excract_supervisor_token(request)
 
         # Blacklist
         if BLACKLIST.match(request.path):
-            _LOGGER.warning("%s is blacklisted!", request.path)
+            _LOGGER.error("%s is blacklisted!", request.path)
             raise HTTPForbidden()
 
         # Ignore security check
@@ -124,16 +154,23 @@ class SecurityMiddleware(CoreSysAttributes):
             _LOGGER.warning("No API token provided for %s", request.path)
             raise HTTPUnauthorized()
 
-        # Home-Assistant
-        if supervisor_token == self.sys_homeassistant.supervisor_token:
-            _LOGGER.debug("%s access from Home Assistant", request.path)
-            request_from = self.sys_homeassistant
+        # Open-Peer-Power
+        if supervisor_token == self.sys_openpeerpower.supervisor_token:
+            _LOGGER.debug("%s access from Open Peer Power", request.path)
+            request_from = self.sys_openpeerpower
 
         # Host
-        # Remove machine_id handling later if all use new CLI
-        if supervisor_token in (self.sys_machine_id, self.sys_plugins.cli.supervisor_token):
+        if supervisor_token == self.sys_plugins.cli.supervisor_token:
             _LOGGER.debug("%s access from Host", request.path)
             request_from = self.sys_host
+
+        # Observer
+        if supervisor_token == self.sys_plugins.observer.supervisor_token:
+            if not OBSERVER_CHECK.match(request.url):
+                _LOGGER.warning("%s invalid Observer access", request.path)
+                raise HTTPForbidden()
+            _LOGGER.debug("%s access from Observer", request.path)
+            request_from = self.sys_plugins.observer
 
         # Add-on
         addon = None
@@ -144,9 +181,9 @@ class SecurityMiddleware(CoreSysAttributes):
         if addon and ADDONS_API_BYPASS.match(request.path):
             _LOGGER.debug("Passthrough %s from %s", request.path, addon.slug)
             request_from = addon
-        elif addon and addon.access_hassio_api:
+        elif addon and addon.access_oppio_api:
             # Check Role
-            if ADDONS_ROLE_ACCESS[addon.hassio_role].match(request.path):
+            if ADDONS_ROLE_ACCESS[addon.oppio_role].match(request.path):
                 _LOGGER.info("%s access from %s", request.path, addon.slug)
                 request_from = addon
             else:

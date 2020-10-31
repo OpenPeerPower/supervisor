@@ -1,4 +1,4 @@
-"""Utils for Home Assistant Proxy."""
+"""Utils for Open Peer Power Proxy."""
 import asyncio
 from contextlib import asynccontextmanager
 import logging
@@ -20,7 +20,7 @@ HEADER_HA_ACCESS = "X-Ha-Access"
 
 
 class APIProxy(CoreSysAttributes):
-    """API Proxy for Home Assistant."""
+    """API Proxy for Open Peer Power."""
 
     def _check_access(self, request: web.Request):
         """Check the Supervisor token."""
@@ -32,8 +32,8 @@ class APIProxy(CoreSysAttributes):
 
         addon = self.sys_addons.from_token(supervisor_token)
         if not addon:
-            _LOGGER.warning("Unknown Home Assistant API access!")
-        elif not addon.access_homeassistant_api:
+            _LOGGER.warning("Unknown Open Peer Power API access!")
+        elif not addon.access_openpeerpower_api:
             _LOGGER.warning("Not permitted API access: %s", addon.slug)
         else:
             _LOGGER.debug("%s access from %s", request.path, addon.slug)
@@ -43,9 +43,9 @@ class APIProxy(CoreSysAttributes):
 
     @asynccontextmanager
     async def _api_client(self, request: web.Request, path: str, timeout: int = 300):
-        """Return a client request with proxy origin for Home Assistant."""
+        """Return a client request with proxy origin for Open Peer Power."""
         try:
-            async with self.sys_homeassistant.make_request(
+            async with self.sys_openpeerpower.api.make_request(
                 request.method.lower(),
                 f"api/{path}",
                 headers={
@@ -75,10 +75,10 @@ class APIProxy(CoreSysAttributes):
     async def stream(self, request: web.Request):
         """Proxy HomeAssistant EventStream Requests."""
         self._check_access(request)
-        if not await self.sys_homeassistant.check_api_state():
+        if not await self.sys_openpeerpower.api.check_api_state():
             raise HTTPBadGateway()
 
-        _LOGGER.info("Home Assistant EventStream start")
+        _LOGGER.info("Open Peer Power EventStream start")
         async with self._api_client(request, "stream", timeout=None) as client:
             response = web.StreamResponse()
             response.content_type = request.headers.get(CONTENT_TYPE)
@@ -90,13 +90,13 @@ class APIProxy(CoreSysAttributes):
             except (aiohttp.ClientError, aiohttp.ClientPayloadError):
                 pass
 
-            _LOGGER.info("Home Assistant EventStream close")
+            _LOGGER.info("Open Peer Power EventStream close")
             return response
 
     async def api(self, request: web.Request):
-        """Proxy Home Assistant API Requests."""
+        """Proxy Open Peer Power API Requests."""
         self._check_access(request)
-        if not await self.sys_homeassistant.check_api_state():
+        if not await self.sys_openpeerpower.api.check_api_state():
             raise HTTPBadGateway()
 
         # Normal request
@@ -109,7 +109,7 @@ class APIProxy(CoreSysAttributes):
 
     async def _websocket_client(self):
         """Initialize a WebSocket API connection."""
-        url = f"{self.sys_homeassistant.api_url}/api/websocket"
+        url = f"{self.sys_openpeerpower.api_url}/api/websocket"
 
         try:
             client = await self.sys_websession_ssl.ws_connect(
@@ -124,13 +124,18 @@ class APIProxy(CoreSysAttributes):
 
             if data.get("type") != "auth_required":
                 # Invalid protocol
-                _LOGGER.error("Got unexpected response from HA WebSocket: %s", data)
+                _LOGGER.error(
+                    "Got unexpected response from Open Peer Power WebSocket: %s", data
+                )
                 raise APIError()
 
             # Auth session
-            await self.sys_homeassistant.ensure_access_token()
+            await self.sys_openpeerpower.api.ensure_access_token()
             await client.send_json(
-                {"type": "auth", "access_token": self.sys_homeassistant.access_token}
+                {
+                    "type": "auth",
+                    "access_token": self.sys_openpeerpower.api.access_token,
+                }
             )
 
             data = await client.receive_json()
@@ -141,25 +146,25 @@ class APIProxy(CoreSysAttributes):
             # Renew the Token is invalid
             if (
                 data.get("type") == "invalid_auth"
-                and self.sys_homeassistant.refresh_token
+                and self.sys_openpeerpower.refresh_token
             ):
-                self.sys_homeassistant.access_token = None
+                self.sys_openpeerpower.api.access_token = None
                 return await self._websocket_client()
 
             raise HomeAssistantAuthError()
 
-        except (RuntimeError, ValueError, ClientConnectorError) as err:
+        except (RuntimeError, ValueError, TypeError, ClientConnectorError) as err:
             _LOGGER.error("Client error on WebSocket API %s.", err)
         except HomeAssistantAuthError:
-            _LOGGER.error("Failed authentication to Home Assistant WebSocket")
+            _LOGGER.error("Failed authentication to Open Peer Power WebSocket")
 
         raise APIError()
 
     async def websocket(self, request: web.Request):
         """Initialize a WebSocket API connection."""
-        if not await self.sys_homeassistant.check_api_state():
+        if not await self.sys_openpeerpower.api.check_api_state():
             raise HTTPBadGateway()
-        _LOGGER.info("Home Assistant WebSocket API request initialize")
+        _LOGGER.info("Open Peer Power WebSocket API request initialize")
 
         # init server
         server = web.WebSocketResponse(heartbeat=30)
@@ -168,7 +173,7 @@ class APIProxy(CoreSysAttributes):
         # handle authentication
         try:
             await server.send_json(
-                {"type": "auth_required", "ha_version": self.sys_homeassistant.version}
+                {"type": "auth_required", "ha_version": self.sys_openpeerpower.version}
             )
 
             # Check API access
@@ -178,7 +183,7 @@ class APIProxy(CoreSysAttributes):
             )
             addon = self.sys_addons.from_token(supervisor_token)
 
-            if not addon or not addon.access_homeassistant_api:
+            if not addon or not addon.access_openpeerpower_api:
                 _LOGGER.warning("Unauthorized WebSocket access!")
                 await server.send_json(
                     {"type": "auth_invalid", "message": "Invalid access"}
@@ -188,19 +193,19 @@ class APIProxy(CoreSysAttributes):
             _LOGGER.info("WebSocket access from %s", addon.slug)
 
             await server.send_json(
-                {"type": "auth_ok", "ha_version": self.sys_homeassistant.version}
+                {"type": "auth_ok", "ha_version": self.sys_openpeerpower.version}
             )
         except (RuntimeError, ValueError) as err:
             _LOGGER.error("Can't initialize handshake: %s", err)
             return server
 
-        # init connection to hass
+        # init connection to opp
         try:
             client = await self._websocket_client()
         except APIError:
             return server
 
-        _LOGGER.info("Home Assistant WebSocket API request running")
+        _LOGGER.info("Open Peer Power WebSocket API request running")
         try:
             client_read = None
             server_read = None
@@ -231,7 +236,7 @@ class APIProxy(CoreSysAttributes):
             pass
 
         except (RuntimeError, ConnectionError, TypeError) as err:
-            _LOGGER.info("Home Assistant WebSocket API error: %s", err)
+            _LOGGER.info("Open Peer Power WebSocket API error: %s", err)
 
         finally:
             if client_read:
@@ -245,5 +250,5 @@ class APIProxy(CoreSysAttributes):
             if not server.closed:
                 await server.close()
 
-        _LOGGER.info("Home Assistant WebSocket API connection is closed")
+        _LOGGER.info("Open Peer Power WebSocket API connection is closed")
         return server

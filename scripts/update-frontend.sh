@@ -5,14 +5,14 @@ set -e
 git submodule update --init --recursive --remote
 
 [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
-cd home-assistant-polymer
+cd open-peer-power-polymer
 nvm install
 script/bootstrap
 
 # build frontend
-cd hassio
-./script/build_hassio
+cd oppio
+./script/build_oppio
 
 # Copy frontend
-rm -f ../../supervisor/hassio/api/panel/*
+rm -rf ../../supervisor/api/panel/*
 cp -rf build/* ../../supervisor/api/panel/

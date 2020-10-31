@@ -1,0 +1,11 @@
+codecov:
+  branch: dev
+coverage:
+  status:
+    project:
+      default:
+        target: 40
+        threshold: 0.09
+comment: false
+github_checks:
+    annotations: false

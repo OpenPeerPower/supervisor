@@ -1,0 +1,23 @@
+# General files
+.git
+.github
+.devcontainer
+.vscode
+
+# Test related files
+.tox
+
+# Temporary files
+**/__pycache__
+.pytest_cache
+
+# virtualenv
+venv/
+
+# Data
+open-peer-power-polymer/
+script/
+tests/
+
+# Test ENV
+data/

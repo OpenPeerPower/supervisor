@@ -6,6 +6,9 @@ import shutil
 import signal
 
 from colorlog import ColoredFormatter
+import sentry_sdk
+from sentry_sdk.integrations.aiohttp import AioHttpIntegration
+from sentry_sdk.integrations.logging import LoggingIntegration
 
 from .addons import AddonManager
 from .api import RestAPI
@@ -16,23 +19,26 @@ from .const import (
     ENV_SUPERVISOR_MACHINE,
     ENV_SUPERVISOR_NAME,
     ENV_SUPERVISOR_SHARE,
+    MACHINE_ID,
     SOCKET_DOCKER,
+    SUPERVISOR_VERSION,
     LogLevel,
-    UpdateChannels,
+    UpdateChannel,
 )
 from .core import Core
 from .coresys import CoreSys
 from .dbus import DBusManager
 from .discovery import Discovery
-from .hassos import HassOS
-from .homeassistant import HomeAssistant
+from .oppos import OppOS
+from .openpeerpower import HomeAssistant
 from .host import HostManager
 from .ingress import Ingress
+from .misc.filter import filter_data
 from .misc.hwmon import HwMonitor
 from .misc.scheduler import Scheduler
-from .misc.secrets import SecretsManager
 from .misc.tasks import Tasks
 from .plugins import PluginManager
+from .resolution import ResolutionManager
 from .services import ServiceManager
 from .snapshots import SnapshotManager
 from .store import StoreManager
@@ -43,14 +49,12 @@ from .utils.dt import fetch_timezone
 _LOGGER: logging.Logger = logging.getLogger(__name__)
 
 
-MACHINE_ID = Path("/etc/machine-id")
-
-
 async def initialize_coresys() -> CoreSys:
     """Initialize supervisor coresys/objects."""
     coresys = CoreSys()
 
     # Initialize core objects
+    coresys.resolution = ResolutionManager(coresys)
     coresys.core = Core(coresys)
     coresys.plugins = PluginManager(coresys)
     coresys.arch = CpuArch(coresys)
@@ -58,7 +62,7 @@ async def initialize_coresys() -> CoreSys:
     coresys.updater = Updater(coresys)
     coresys.api = RestAPI(coresys)
     coresys.supervisor = Supervisor(coresys)
-    coresys.homeassistant = HomeAssistant(coresys)
+    coresys.openpeerpower = HomeAssistant(coresys)
     coresys.addons = AddonManager(coresys)
     coresys.snapshots = SnapshotManager(coresys)
     coresys.host = HostManager(coresys)
@@ -69,9 +73,11 @@ async def initialize_coresys() -> CoreSys:
     coresys.store = StoreManager(coresys)
     coresys.discovery = Discovery(coresys)
     coresys.dbus = DBusManager(coresys)
-    coresys.hassos = HassOS(coresys)
-    coresys.secrets = SecretsManager(coresys)
+    coresys.oppos = OppOS(coresys)
     coresys.scheduler = Scheduler(coresys)
+
+    # diagnostics
+    setup_diagnostics(coresys)
 
     # bootstrap config
     initialize_system_data(coresys)
@@ -89,7 +95,7 @@ async def initialize_coresys() -> CoreSys:
         coresys.machine = os.environ[ENV_SUPERVISOR_MACHINE]
     elif os.environ.get(ENV_HOMEASSISTANT_REPOSITORY):
         coresys.machine = os.environ[ENV_HOMEASSISTANT_REPOSITORY][14:-14]
-    _LOGGER.info("Setup coresys for machine: %s", coresys.machine)
+    _LOGGER.debug("Seting up coresys for machine: %s", coresys.machine)
 
     return coresys
 
@@ -98,74 +104,84 @@ def initialize_system_data(coresys: CoreSys) -> None:
     """Set up the default configuration and create folders."""
     config = coresys.config
 
-    # Home Assistant configuration folder
-    if not config.path_homeassistant.is_dir():
-        _LOGGER.info(
-            "Create Home Assistant configuration folder %s", config.path_homeassistant
+    # Open Peer Power configuration folder
+    if not config.path_openpeerpower.is_dir():
+        _LOGGER.debug(
+            "Creating Open Peer Power configuration folder at '%s'",
+            config.path_openpeerpower,
         )
-        config.path_homeassistant.mkdir()
+        config.path_openpeerpower.mkdir()
 
     # Supervisor ssl folder
     if not config.path_ssl.is_dir():
-        _LOGGER.info("Create Supervisor SSL/TLS folder %s", config.path_ssl)
+        _LOGGER.debug("Creating Supervisor SSL/TLS folder at '%s'", config.path_ssl)
         config.path_ssl.mkdir()
 
     # Supervisor addon data folder
     if not config.path_addons_data.is_dir():
-        _LOGGER.info("Create Supervisor Add-on data folder %s", config.path_addons_data)
+        _LOGGER.info(
+            "Creating Supervisor Add-on data folder at '%s'", config.path_addons_data
+        )
         config.path_addons_data.mkdir(parents=True)
 
     if not config.path_addons_local.is_dir():
-        _LOGGER.info(
-            "Create Supervisor Add-on local repository folder %s",
+        _LOGGER.debug(
+            "Creating Supervisor Add-on local repository folder at '%s'",
             config.path_addons_local,
         )
         config.path_addons_local.mkdir(parents=True)
 
     if not config.path_addons_git.is_dir():
-        _LOGGER.info(
-            "Create Supervisor Add-on git repositories folder %s",
+        _LOGGER.debug(
+            "Creating Supervisor Add-on git repositories folder at '%s'",
             config.path_addons_git,
         )
         config.path_addons_git.mkdir(parents=True)
 
     # Supervisor tmp folder
     if not config.path_tmp.is_dir():
-        _LOGGER.info("Create Supervisor temp folder %s", config.path_tmp)
+        _LOGGER.debug("Creating Supervisor temp folder at '%s'", config.path_tmp)
         config.path_tmp.mkdir(parents=True)
 
     # Supervisor backup folder
     if not config.path_backup.is_dir():
-        _LOGGER.info("Create Supervisor backup folder %s", config.path_backup)
+        _LOGGER.debug("Creating Supervisor backup folder at '%s'", config.path_backup)
         config.path_backup.mkdir()
 
     # Share folder
     if not config.path_share.is_dir():
-        _LOGGER.info("Create Supervisor share folder %s", config.path_share)
+        _LOGGER.debug("Creating Supervisor share folder at '%s'", config.path_share)
         config.path_share.mkdir()
 
     # Apparmor folder
     if not config.path_apparmor.is_dir():
-        _LOGGER.info("Create Supervisor Apparmor folder %s", config.path_apparmor)
+        _LOGGER.debug(
+            "Creating Supervisor Apparmor folder at '%s'", config.path_apparmor
+        )
         config.path_apparmor.mkdir()
 
     # DNS folder
     if not config.path_dns.is_dir():
-        _LOGGER.info("Create Supervisor DNS folder %s", config.path_dns)
+        _LOGGER.debug("Creating Supervisor DNS folder at '%s'", config.path_dns)
         config.path_dns.mkdir()
 
     # Audio folder
     if not config.path_audio.is_dir():
-        _LOGGER.info("Create Supervisor audio folder %s", config.path_audio)
+        _LOGGER.debug("Creating Supervisor audio folder at '%s'", config.path_audio)
         config.path_audio.mkdir()
+
+    # Media folder
+    if not config.path_media.is_dir():
+        _LOGGER.debug("Creating Supervisor media folder at '%s'", config.path_media)
+        config.path_media.mkdir()
 
     # Update log level
     coresys.config.modify_log_level()
 
     # Check if ENV is in development mode
-    if bool(os.environ.get("SUPERVISOR_DEV", 0)):
-        _LOGGER.warning("SUPERVISOR_DEV is set")
-        coresys.updater.channel = UpdateChannels.DEV
+    if coresys.dev:
+        _LOGGER.warning("Environment variables 'SUPERVISOR_DEV' is set")
+        coresys.updater.channel = UpdateChannel.DEV
         coresys.config.logging = LogLevel.DEBUG
         coresys.config.debug = True
 
@@ -174,13 +190,13 @@ def migrate_system_env(coresys: CoreSys) -> None:
     """Cleanup some stuff after update."""
     config = coresys.config
 
-    # hass.io 0.37 -> 0.38
+    # opp.io 0.37 -> 0.38
     old_build = Path(config.path_supervisor, "addons/build")
     if old_build.is_dir():
         try:
             old_build.rmdir()
         except OSError:
-            _LOGGER.warning("Can't cleanup old Add-on build directory")
+            _LOGGER.error("Can't cleanup old Add-on build directory at '%s'", old_build)
 
 
 def initialize_logging() -> None:
@@ -216,43 +232,45 @@ def check_environment() -> None:
         try:
             os.environ[key]
         except KeyError:
-            _LOGGER.critical("Can't find %s in env!", key)
+            _LOGGER.critical("Can't find '%s' environment variable!", key)
 
     # Check Machine info
     if not os.environ.get(ENV_HOMEASSISTANT_REPOSITORY) and not os.environ.get(
         ENV_SUPERVISOR_MACHINE
     ):
-        _LOGGER.critical("Can't find any kind of machine/homeassistant details!")
+        _LOGGER.critical("Can't find any kind of machine/openpeerpower details!")
     elif not os.environ.get(ENV_SUPERVISOR_MACHINE):
-        _LOGGER.info("Use the old homeassistant repository for machine extraction")
+        _LOGGER.info("Use the old openpeerpower repository for machine extraction")
 
     # check docker socket
     if not SOCKET_DOCKER.is_socket():
         _LOGGER.critical("Can't find Docker socket!")
 
     # check socat exec
-    if not shutil.which("socat"):
-        _LOGGER.critical("Can't find socat!")
-
-    # check socat exec
     if not shutil.which("gdbus"):
         _LOGGER.critical("Can't find gdbus!")
 
 
-def reg_signal(loop) -> None:
+def reg_signal(loop, coresys: CoreSys) -> None:
     """Register SIGTERM and SIGKILL to stop system."""
     try:
-        loop.add_signal_handler(signal.SIGTERM, lambda: loop.call_soon(loop.stop))
+        loop.add_signal_handler(
+            signal.SIGTERM, lambda: loop.create_task(coresys.core.stop())
+        )
     except (ValueError, RuntimeError):
         _LOGGER.warning("Could not bind to SIGTERM")
 
     try:
-        loop.add_signal_handler(signal.SIGHUP, lambda: loop.call_soon(loop.stop))
+        loop.add_signal_handler(
+            signal.SIGHUP, lambda: loop.create_task(coresys.core.stop())
+        )
     except (ValueError, RuntimeError):
         _LOGGER.warning("Could not bind to SIGHUP")
 
     try:
-        loop.add_signal_handler(signal.SIGINT, lambda: loop.call_soon(loop.stop))
+        loop.add_signal_handler(
+            signal.SIGINT, lambda: loop.create_task(coresys.core.stop())
+        )
     except (ValueError, RuntimeError):
         _LOGGER.warning("Could not bind to SIGINT")
 
@@ -262,11 +280,28 @@ def supervisor_debugger(coresys: CoreSys) -> None:
     if not coresys.config.debug:
         return
     # pylint: disable=import-outside-toplevel
-    import ptvsd
+    import debugpy
 
-    _LOGGER.info("Initialize Supervisor debugger")
+    _LOGGER.info("Initializing Supervisor debugger")
 
-    ptvsd.enable_attach(address=("0.0.0.0", 33333), redirect_output=True)
+    debugpy.listen(("0.0.0.0", 33333))
     if coresys.config.debug_block:
-        _LOGGER.info("Wait until debugger is attached")
-        ptvsd.wait_for_attach()
+        _LOGGER.debug("Wait until debugger is attached")
+        debugpy.wait_for_client()
+
+
+def setup_diagnostics(coresys: CoreSys) -> None:
+    """Sentry diagnostic backend."""
+    sentry_logging = LoggingIntegration(
+        level=logging.WARNING, event_level=logging.CRITICAL
+    )
+
+    _LOGGER.info("Initializing Supervisor Sentry")
+    sentry_sdk.init(
+        dsn="https://9c6ea70f49234442b4746e447b24747e@o427061.ingest.sentry.io/5370612",
+        before_send=lambda event, hint: filter_data(coresys, event, hint),
+        auto_enabling_integrations=False,
+        integrations=[AioHttpIntegration(), sentry_logging],
+        release=SUPERVISOR_VERSION,
+        max_breadcrumbs=30,
+    )

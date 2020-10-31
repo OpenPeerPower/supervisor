@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from typing import TYPE_CHECKING, Any, Callable, Coroutine, Optional, TypeVar
 
 import aiohttp
+import sentry_sdk
 
 from .config import CoreConfig
-from .const import UpdateChannels
+from .const import ENV_SUPERVISOR_DEV
 from .docker import DockerAPI
 from .misc.hardware import Hardware
 
@@ -19,12 +21,11 @@ if TYPE_CHECKING:
     from .core import Core
     from .dbus import DBusManager
     from .discovery import Discovery
-    from .hassos import HassOS
+    from .oppos import OppOS
     from .misc.scheduler import Scheduler
     from .misc.hwmon import HwMonitor
-    from .misc.secrets import SecretsManager
     from .misc.tasks import Tasks
-    from .homeassistant import HomeAssistant
+    from .openpeerpower import HomeAssistant
     from .host import HostManager
     from .ingress import Ingress
     from .services import ServiceManager
@@ -33,6 +34,7 @@ if TYPE_CHECKING:
     from .store import StoreManager
     from .updater import Updater
     from .plugins import PluginManager
+    from .resolution import ResolutionManager
 
 
 T = TypeVar("T")
@@ -43,7 +45,7 @@ class CoreSys:
 
     def __init__(self):
         """Initialize coresys."""
-        # Static attributes
+        # Static attributes protected
         self._machine_id: Optional[str] = None
         self._machine: Optional[str] = None
 
@@ -63,7 +65,7 @@ class CoreSys:
         self._core: Optional[Core] = None
         self._arch: Optional[CpuArch] = None
         self._auth: Optional[Auth] = None
-        self._homeassistant: Optional[HomeAssistant] = None
+        self._openpeerpower: Optional[HomeAssistant] = None
         self._supervisor: Optional[Supervisor] = None
         self._addons: Optional[AddonManager] = None
         self._api: Optional[RestAPI] = None
@@ -73,26 +75,19 @@ class CoreSys:
         self._host: Optional[HostManager] = None
         self._ingress: Optional[Ingress] = None
         self._dbus: Optional[DBusManager] = None
-        self._hassos: Optional[HassOS] = None
+        self._oppos: Optional[OppOS] = None
         self._services: Optional[ServiceManager] = None
-        self._secrets: Optional[SecretsManager] = None
         self._scheduler: Optional[Scheduler] = None
         self._store: Optional[StoreManager] = None
         self._discovery: Optional[Discovery] = None
         self._hwmonitor: Optional[HwMonitor] = None
         self._plugins: Optional[PluginManager] = None
+        self._resolution: Optional[ResolutionManager] = None
 
     @property
     def dev(self) -> bool:
         """Return True if we run dev mode."""
-        if self._updater is None:
-            return False
-        return self._updater.channel == UpdateChannels.DEV
-
-    @property
-    def timezone(self) -> str:
-        """Return timezone."""
-        return self._config.timezone
+        return bool(os.environ.get(ENV_SUPERVISOR_DEV, 0))
 
     @property
     def loop(self) -> asyncio.BaseEventLoop:
@@ -195,18 +190,18 @@ class CoreSys:
         self._auth = value
 
     @property
-    def homeassistant(self) -> HomeAssistant:
-        """Return Home Assistant object."""
-        if self._homeassistant is None:
-            raise RuntimeError("Home Assistant not set!")
-        return self._homeassistant
+    def openpeerpower(self) -> HomeAssistant:
+        """Return Open Peer Power object."""
+        if self._openpeerpower is None:
+            raise RuntimeError("Open Peer Power not set!")
+        return self._openpeerpower
 
-    @homeassistant.setter
-    def homeassistant(self, value: HomeAssistant) -> None:
+    @openpeerpower.setter
+    def openpeerpower(self, value: HomeAssistant) -> None:
         """Set a HomeAssistant object."""
-        if self._homeassistant:
-            raise RuntimeError("Home Assistant already set!")
-        self._homeassistant = value
+        if self._openpeerpower:
+            raise RuntimeError("Open Peer Power already set!")
+        self._openpeerpower = value
 
     @property
     def supervisor(self) -> Supervisor:
@@ -249,20 +244,6 @@ class CoreSys:
         if self._updater:
             raise RuntimeError("Updater already set!")
         self._updater = value
-
-    @property
-    def secrets(self) -> SecretsManager:
-        """Return SecretsManager object."""
-        if self._secrets is None:
-            raise RuntimeError("SecretsManager not set!")
-        return self._secrets
-
-    @secrets.setter
-    def secrets(self, value: SecretsManager) -> None:
-        """Set a Updater object."""
-        if self._secrets:
-            raise RuntimeError("SecretsManager already set!")
-        self._secrets = value
 
     @property
     def addons(self) -> AddonManager:
@@ -405,18 +386,32 @@ class CoreSys:
         self._ingress = value
 
     @property
-    def hassos(self) -> HassOS:
-        """Return HassOS object."""
-        if self._hassos is None:
-            raise RuntimeError("HassOS not set!")
-        return self._hassos
+    def oppos(self) -> OppOS:
+        """Return OppOS object."""
+        if self._oppos is None:
+            raise RuntimeError("OppOS not set!")
+        return self._oppos
 
-    @hassos.setter
-    def hassos(self, value: HassOS) -> None:
-        """Set a HassOS object."""
-        if self._hassos:
-            raise RuntimeError("HassOS already set!")
-        self._hassos = value
+    @oppos.setter
+    def oppos(self, value: OppOS) -> None:
+        """Set a OppOS object."""
+        if self._oppos:
+            raise RuntimeError("OppOS already set!")
+        self._oppos = value
+
+    @property
+    def resolution(self) -> ResolutionManager:
+        """Return resolution manager object."""
+        if self._resolution is None:
+            raise RuntimeError("resolution manager not set!")
+        return self._resolution
+
+    @resolution.setter
+    def resolution(self, value: ResolutionManager) -> None:
+        """Set a resolution manager object."""
+        if self._resolution:
+            raise RuntimeError("resolution manager already set!")
+        self._resolution = value
 
     @property
     def machine(self) -> Optional[str]:
@@ -457,16 +452,6 @@ class CoreSysAttributes:
     def sys_dev(self) -> bool:
         """Return True if we run dev mode."""
         return self.coresys.dev
-
-    @property
-    def sys_timezone(self) -> str:
-        """Return timezone."""
-        return self.coresys.timezone
-
-    @property
-    def sys_machine_id(self) -> Optional[str]:
-        """Return timezone."""
-        return self.coresys.machine_id
 
     @property
     def sys_loop(self) -> asyncio.BaseEventLoop:
@@ -524,9 +509,9 @@ class CoreSysAttributes:
         return self.coresys.auth
 
     @property
-    def sys_homeassistant(self) -> HomeAssistant:
-        """Return Home Assistant object."""
-        return self.coresys.homeassistant
+    def sys_openpeerpower(self) -> HomeAssistant:
+        """Return Open Peer Power object."""
+        return self.coresys.openpeerpower
 
     @property
     def sys_supervisor(self) -> Supervisor:
@@ -542,11 +527,6 @@ class CoreSysAttributes:
     def sys_updater(self) -> Updater:
         """Return Updater object."""
         return self.coresys.updater
-
-    @property
-    def sys_secrets(self) -> SecretsManager:
-        """Return SecretsManager object."""
-        return self.coresys.secrets
 
     @property
     def sys_addons(self) -> AddonManager:
@@ -599,9 +579,14 @@ class CoreSysAttributes:
         return self.coresys.ingress
 
     @property
-    def sys_hassos(self) -> HassOS:
-        """Return HassOS object."""
-        return self.coresys.hassos
+    def sys_oppos(self) -> OppOS:
+        """Return OppOS object."""
+        return self.coresys.oppos
+
+    @property
+    def sys_resolution(self) -> ResolutionManager:
+        """Return Resolution manager object."""
+        return self.coresys.resolution
 
     def sys_run_in_executor(
         self, funct: Callable[..., T], *args: Any
@@ -612,3 +597,7 @@ class CoreSysAttributes:
     def sys_create_task(self, coroutine: Coroutine) -> asyncio.Task:
         """Create an async task."""
         return self.sys_loop.create_task(coroutine)
+
+    def sys_capture_exception(self, err: Exception) -> None:
+        """Capture a exception."""
+        sentry_sdk.capture_exception(err)

@@ -8,14 +8,25 @@ from typing import Any, Dict, Optional
 import attr
 import docker
 from packaging import version as pkg_version
+import requests
 
-from ..const import DNS_SUFFIX, SOCKET_DOCKER
-from ..exceptions import DockerAPIError
+from ..const import (
+    ATTR_REGISTRIES,
+    DNS_SUFFIX,
+    DOCKER_IMAGE_DENYLIST,
+    DOCKER_NETWORK,
+    FILE_OPPIO_DOCKER,
+    SOCKET_DOCKER,
+)
+from ..exceptions import DockerAPIError, DockerError, DockerNotFound, DockerRequestError
+from ..utils.json import JsonConfig
+from ..validate import SCHEMA_DOCKER_CONFIG
 from .network import DockerNetwork
 
 _LOGGER: logging.Logger = logging.getLogger(__name__)
 
 MIN_SUPPORTED_DOCKER = "19.03.0"
+DOCKER_NETWORK_HOST = "host"
 
 
 @attr.s(frozen=True)
@@ -60,6 +71,21 @@ class DockerInfo:
         if self.logging != "journald":
             _LOGGER.error("Docker logging driver %s is not supported!", self.logging)
 
+        return self.storage != "overlay2" or self.logging != "journald"
+
+
+class DockerConfig(JsonConfig):
+    """Open Peer Power core object for Docker configuration."""
+
+    def __init__(self):
+        """Initialize the JSON configuration."""
+        super().__init__(FILE_OPPIO_DOCKER, SCHEMA_DOCKER_CONFIG)
+
+    @property
+    def registries(self) -> Dict[str, Any]:
+        """Return credentials for docker registries."""
+        return self._data.get(ATTR_REGISTRIES, {})
+
 
 class DockerAPI:
     """Docker Supervisor wrapper.
@@ -74,6 +100,7 @@ class DockerAPI:
         )
         self.network: DockerNetwork = DockerNetwork(self.docker)
         self._info: DockerInfo = DockerInfo.new(self.docker.info())
+        self.config: DockerConfig = DockerConfig()
 
     @property
     def images(self) -> docker.models.images.ImageCollection:
@@ -126,30 +153,52 @@ class DockerAPI:
             container = self.docker.containers.create(
                 f"{image}:{version}", use_config_proxy=False, **kwargs
             )
+        except docker.errors.NotFound as err:
+            _LOGGER.error("Image %s not exists for %s", image, name)
+            raise DockerNotFound() from err
         except docker.errors.DockerException as err:
             _LOGGER.error("Can't create container from %s: %s", name, err)
-            raise DockerAPIError() from None
+            raise DockerAPIError() from err
+        except requests.RequestException as err:
+            _LOGGER.error("Dockerd connection issue for %s: %s", name, err)
+            raise DockerRequestError() from err
 
         # Attach network
         if not network_mode:
             alias = [hostname] if hostname else None
             try:
                 self.network.attach_container(container, alias=alias, ipv4=ipv4)
-            except DockerAPIError:
-                _LOGGER.warning("Can't attach %s to hassio-net!", name)
+            except DockerError:
+                _LOGGER.warning("Can't attach %s to oppio-network!", name)
             else:
-                with suppress(DockerAPIError):
+                with suppress(DockerError):
                     self.network.detach_default_bridge(container)
+        else:
+            host_network: docker.models.networks.Network = self.docker.networks.get(
+                DOCKER_NETWORK_HOST
+            )
+
+            # Check if container is register on host
+            # https://github.com/moby/moby/issues/23302
+            if name in (
+                val.get("Name")
+                for val in host_network.attrs.get("Containers", {}).values()
+            ):
+                with suppress(docker.errors.NotFound):
+                    host_network.disconnect(name, force=True)
 
         # Run container
         try:
             container.start()
         except docker.errors.DockerException as err:
             _LOGGER.error("Can't start %s: %s", name, err)
-            raise DockerAPIError() from None
+            raise DockerAPIError() from err
+        except requests.RequestException as err:
+            _LOGGER.error("Dockerd connection issue for %s: %s", name, err)
+            raise DockerRequestError() from err
 
         # Update metadata
-        with suppress(docker.errors.DockerException):
+        with suppress(docker.errors.DockerException, requests.RequestException):
             container.reload()
 
         return container
@@ -168,7 +217,8 @@ class DockerAPI:
         stdout = kwargs.get("stdout", True)
         stderr = kwargs.get("stderr", True)
 
-        _LOGGER.info("Run command '%s' on %s", command, image)
+        _LOGGER.info("Runing command '%s' on %s", command, image)
+        container = None
         try:
             container = self.docker.containers.run(
                 f"{image}:{version}",
@@ -182,14 +232,15 @@ class DockerAPI:
             result = container.wait()
             output = container.logs(stdout=stdout, stderr=stderr)
 
-        except docker.errors.DockerException as err:
+        except (docker.errors.DockerException, requests.RequestException) as err:
             _LOGGER.error("Can't execute command: %s", err)
-            raise DockerAPIError() from None
+            raise DockerError() from err
 
         finally:
             # cleanup container
-            with suppress(docker.errors.DockerException):
-                container.remove(force=True)
+            if container:
+                with suppress(docker.errors.DockerException, requests.RequestException):
+                    container.remove(force=True)
 
         return CommandReturn(result.get("StatusCode"), output)
 
@@ -230,3 +281,65 @@ class DockerAPI:
             _LOGGER.debug("Networks prune: %s", output)
         except docker.errors.APIError as err:
             _LOGGER.warning("Error for networks prune: %s", err)
+
+        _LOGGER.info("Fix stale container on oppio network")
+        try:
+            self.prune_networks(DOCKER_NETWORK)
+        except docker.errors.APIError as err:
+            _LOGGER.warning("Error for networks oppio prune: %s", err)
+
+        _LOGGER.info("Fix stale container on host network")
+        try:
+            self.prune_networks(DOCKER_NETWORK_HOST)
+        except docker.errors.APIError as err:
+            _LOGGER.warning("Error for networks host prune: %s", err)
+
+    def prune_networks(self, network_name: str) -> None:
+        """Prune stale container from network.
+
+        Fix: https://github.com/moby/moby/issues/23302
+        """
+        network: docker.models.networks.Network = self.docker.networks.get(network_name)
+
+        for cid, data in network.attrs.get("Containers", {}).items():
+            try:
+                self.docker.containers.get(cid)
+                continue
+            except docker.errors.NotFound:
+                _LOGGER.debug(
+                    "Docker network %s is corrupt on container: %s", network_name, cid
+                )
+            except (docker.errors.DockerException, requests.RequestException):
+                _LOGGER.warning(
+                    "Docker fatal error on container %s on %s", cid, network_name
+                )
+                continue
+
+            with suppress(docker.errors.DockerException, requests.RequestException):
+                network.disconnect(data.get("Name", cid), force=True)
+
+    def check_denylist_images(self) -> bool:
+        """Return a boolean if the host has images in the denylist."""
+        denied_images = set()
+
+        try:
+            for image in self.images.list():
+                for tag in image.tags:
+                    image_name = tag.split(":")[0]
+                    if (
+                        image_name in DOCKER_IMAGE_DENYLIST
+                        and image_name not in denied_images
+                    ):
+                        denied_images.add(image_name)
+        except (docker.errors.DockerException, requests.RequestException) as err:
+            _LOGGER.error("Corrupt docker overlayfs detect: %s", err)
+            raise DockerError() from err
+
+        if not denied_images:
+            return False
+
+        _LOGGER.error(
+            "Found images: '%s' which are not supported, remove these from the host!",
+            ", ".join(denied_images),
+        )
+        return True

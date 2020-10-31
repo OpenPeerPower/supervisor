@@ -22,8 +22,8 @@ from ..const import (
     ATTR_ENVIRONMENT,
     ATTR_FULL_ACCESS,
     ATTR_GPIO,
-    ATTR_HASSIO_API,
-    ATTR_HASSIO_ROLE,
+    ATTR_OPPIO_API,
+    ATTR_OPPIO_ROLE,
     ATTR_HOMEASSISTANT,
     ATTR_HOMEASSISTANT_API,
     ATTR_HOST_DBUS,
@@ -58,13 +58,16 @@ from ..const import (
     ATTR_TMPFS,
     ATTR_UDEV,
     ATTR_URL,
+    ATTR_USB,
     ATTR_VERSION,
     ATTR_VIDEO,
+    ATTR_WATCHDOG,
     ATTR_WEBUI,
     SECURITY_DEFAULT,
     SECURITY_DISABLE,
     SECURITY_PROFILE,
-    AddonStages,
+    AddonBoot,
+    AddonStage,
     AddonStartup,
 )
 from ..coresys import CoreSys, CoreSysAttributes
@@ -107,7 +110,7 @@ class AddonModel(CoreSysAttributes, ABC):
         return self.data[ATTR_OPTIONS]
 
     @property
-    def boot(self) -> bool:
+    def boot(self) -> AddonBoot:
         """Return boot config with prio local settings."""
         return self.data[ATTR_BOOT]
 
@@ -205,7 +208,7 @@ class AddonModel(CoreSysAttributes, ABC):
         return self.data[ATTR_ADVANCED]
 
     @property
-    def stage(self) -> AddonStages:
+    def stage(self) -> AddonStage:
         """Return stage mode of add-on."""
         return self.data[ATTR_STAGE]
 
@@ -246,6 +249,11 @@ class AddonModel(CoreSysAttributes, ABC):
     def webui(self) -> Optional[str]:
         """Return URL to webui or None."""
         return self.data.get(ATTR_WEBUI)
+
+    @property
+    def watchdog(self) -> Optional[str]:
+        """Return URL to for watchdog or None."""
+        return self.data.get(ATTR_WATCHDOG)
 
     @property
     def ingress_port(self) -> Optional[int]:
@@ -293,11 +301,6 @@ class AddonModel(CoreSysAttributes, ABC):
         return self.data.get(ATTR_DEVICES, [])
 
     @property
-    def auto_uart(self) -> bool:
-        """Return True if we should map all UART device."""
-        return self.data[ATTR_AUTO_UART]
-
-    @property
     def tmpfs(self) -> Optional[str]:
         """Return tmpfs of add-on."""
         return self.data.get(ATTR_TMPFS)
@@ -323,7 +326,7 @@ class AddonModel(CoreSysAttributes, ABC):
 
     @property
     def legacy(self) -> bool:
-        """Return if the add-on don't support Home Assistant labels."""
+        """Return if the add-on don't support Open Peer Power labels."""
         return self.data[ATTR_LEGACY]
 
     @property
@@ -332,19 +335,19 @@ class AddonModel(CoreSysAttributes, ABC):
         return self.data[ATTR_DOCKER_API]
 
     @property
-    def access_hassio_api(self) -> bool:
+    def access_oppio_api(self) -> bool:
         """Return True if the add-on access to Supervisor REASTful API."""
-        return self.data[ATTR_HASSIO_API]
+        return self.data[ATTR_OPPIO_API]
 
     @property
-    def access_homeassistant_api(self) -> bool:
-        """Return True if the add-on access to Home Assistant API proxy."""
+    def access_openpeerpower_api(self) -> bool:
+        """Return True if the add-on access to Open Peer Power API proxy."""
         return self.data[ATTR_HOMEASSISTANT_API]
 
     @property
-    def hassio_role(self) -> str:
+    def oppio_role(self) -> str:
         """Return Supervisor role for API."""
-        return self.data[ATTR_HASSIO_ROLE]
+        return self.data[ATTR_OPPIO_ROLE]
 
     @property
     def snapshot_exclude(self) -> List[str]:
@@ -375,6 +378,16 @@ class AddonModel(CoreSysAttributes, ABC):
     def with_gpio(self) -> bool:
         """Return True if the add-on access to GPIO interface."""
         return self.data[ATTR_GPIO]
+
+    @property
+    def with_usb(self) -> bool:
+        """Return True if the add-on need USB access."""
+        return self.data[ATTR_USB]
+
+    @property
+    def with_uart(self) -> bool:
+        """Return True if we should map all UART device."""
+        return self.data[ATTR_AUTO_UART]
 
     @property
     def with_udev(self) -> bool:
@@ -412,8 +425,8 @@ class AddonModel(CoreSysAttributes, ABC):
         return self.data[ATTR_VIDEO]
 
     @property
-    def homeassistant_version(self) -> Optional[str]:
-        """Return min Home Assistant version they needed by Add-on."""
+    def openpeerpower_version(self) -> Optional[str]:
+        """Return min Open Peer Power version they needed by Add-on."""
         return self.data.get(ATTR_HOMEASSISTANT)
 
     @property
@@ -535,17 +548,19 @@ class AddonModel(CoreSysAttributes, ABC):
 
         # Machine / Hardware
         machine = config.get(ATTR_MACHINE)
-        if machine and self.sys_machine not in machine:
+        if machine and f"!{self.sys_machine}" in machine:
+            return False
+        elif machine and self.sys_machine not in machine:
             return False
 
-        # Home Assistant
+        # Open Peer Power
         version = config.get(ATTR_HOMEASSISTANT)
-        if version is None or self.sys_homeassistant.version is None:
+        if version is None or self.sys_openpeerpower.version is None:
             return True
 
         try:
             return pkg_version.parse(
-                self.sys_homeassistant.version
+                self.sys_openpeerpower.version
             ) >= pkg_version.parse(version)
         except pkg_version.InvalidVersion:
             return True

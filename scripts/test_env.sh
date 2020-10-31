@@ -56,11 +56,11 @@ function stop_docker() {
 
 
 function build_supervisor() {
-    docker pull homeassistant/amd64-builder:dev
+    docker pull openpeerpower/amd64-builder:dev
 
     docker run --rm --privileged \
         -v /run/docker.sock:/run/docker.sock -v "$(pwd):/data" \
-        homeassistant/amd64-builder:dev \
+        openpeerpower/amd64-builder:dev \
             --generic dev -t /data --test --amd64 --no-cache
 }
 
@@ -86,7 +86,7 @@ function setup_test_env() {
 
     echo "Start Supervisor"
     docker run --rm --privileged \
-        --name hassio_supervisor \
+        --name oppio_supervisor \
         --security-opt seccomp=unconfined \
         --security-opt apparmor:unconfined \
         -v /run/docker.sock:/run/docker.sock \
@@ -94,10 +94,10 @@ function setup_test_env() {
         -v "/workspaces/test_supervisor":/data \
         -v /etc/machine-id:/etc/machine-id:ro \
         -e SUPERVISOR_SHARE="/workspaces/test_supervisor" \
-        -e SUPERVISOR_NAME=hassio_supervisor \
+        -e SUPERVISOR_NAME=oppio_supervisor \
         -e SUPERVISOR_DEV=1 \
         -e SUPERVISOR_MACHINE="qemux86-64" \
-        homeassistant/amd64-hassio-supervisor:latest
+        openpeerpower/amd64-oppio-supervisor:latest
 
 }
 
