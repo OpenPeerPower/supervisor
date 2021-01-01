@@ -4,7 +4,7 @@
   "slug": "test_addon",
   "description": "This is a basic Test Add-on",
   "arch": ["amd64"],
-  "url": "https://www.openpeerpower.io/",
+  "url": "https://www.open-peer-power.io/",
   "startup": "application",
   "boot": "auto",
   "map": ["config:rw", "ssl"],

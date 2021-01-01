@@ -7,7 +7,7 @@ In the future we want to remove this in favour of a "center" in the UI.
 import logging
 
 from ..coresys import CoreSys, CoreSysAttributes
-from ..exceptions import HomeAssistantAPIError
+from ..exceptions import OpenPeerPowerAPIError
 from .const import IssueType
 
 _LOGGER: logging.Logger = logging.getLogger(__name__)
@@ -35,7 +35,7 @@ class ResolutionNotify(CoreSysAttributes):
                 messages.append(
                     {
                         "title": "Available space is less than 1GB!",
-                        "message": f"Available space is {self.sys_host.info.free_space}GB, see https://www.openpeerpower.io/more-info/free-space for more information.",
+                        "message": f"Available space is {self.sys_host.info.free_space}GB, see https://www.open-peer-power.io/more-info/free-space for more information.",
                         "notification_id": "supervisor_issue_free_space",
                     }
                 )
@@ -51,5 +51,5 @@ class ResolutionNotify(CoreSysAttributes):
                         _LOGGER.debug("Sucessfully created persistent_notification")
                     else:
                         _LOGGER.error("Can't create persistant notification")
-            except HomeAssistantAPIError:
+            except OpenPeerPowerAPIError:
                 _LOGGER.error("Can't create persistant notification")

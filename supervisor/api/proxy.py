@@ -10,7 +10,7 @@ from aiohttp.hdrs import AUTHORIZATION, CONTENT_TYPE
 from aiohttp.web_exceptions import HTTPBadGateway, HTTPUnauthorized
 
 from ..coresys import CoreSysAttributes
-from ..exceptions import APIError, HomeAssistantAPIError, HomeAssistantAuthError
+from ..exceptions import APIError, OpenPeerPowerAPIError, OpenPeerPowerAuthError
 
 _LOGGER: logging.Logger = logging.getLogger(__name__)
 
@@ -61,9 +61,9 @@ class APIProxy(CoreSysAttributes):
                 yield resp
                 return
 
-        except HomeAssistantAuthError:
+        except OpenPeerPowerAuthError:
             _LOGGER.error("Authenticate error on API for request %s", path)
-        except HomeAssistantAPIError:
+        except OpenPeerPowerAPIError:
             _LOGGER.error("Error on API for request %s", path)
         except aiohttp.ClientError as err:
             _LOGGER.error("Client error on API %s request %s", path, err)
@@ -73,7 +73,7 @@ class APIProxy(CoreSysAttributes):
         raise HTTPBadGateway()
 
     async def stream(self, request: web.Request):
-        """Proxy HomeAssistant EventStream Requests."""
+        """Proxy OpenPeerPower EventStream Requests."""
         self._check_access(request)
         if not await self.sys_openpeerpower.api.check_api_state():
             raise HTTPBadGateway()
@@ -151,11 +151,11 @@ class APIProxy(CoreSysAttributes):
                 self.sys_openpeerpower.api.access_token = None
                 return await self._websocket_client()
 
-            raise HomeAssistantAuthError()
+            raise OpenPeerPowerAuthError()
 
         except (RuntimeError, ValueError, TypeError, ClientConnectorError) as err:
             _LOGGER.error("Client error on WebSocket API %s.", err)
-        except HomeAssistantAuthError:
+        except OpenPeerPowerAuthError:
             _LOGGER.error("Failed authentication to Open Peer Power WebSocket")
 
         raise APIError()
@@ -199,7 +199,7 @@ class APIProxy(CoreSysAttributes):
             _LOGGER.error("Can't initialize handshake: %s", err)
             return server
 
-        # init connection to opp
+        # init connection to hass
         try:
             client = await self._websocket_client()
         except APIError:

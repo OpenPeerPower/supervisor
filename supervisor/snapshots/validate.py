@@ -10,7 +10,7 @@ from ..const import (
     ATTR_DATE,
     ATTR_DOCKER,
     ATTR_FOLDERS,
-    ATTR_HOMEASSISTANT,
+    ATTR_OPENPEERPOWER,
     ATTR_IMAGE,
     ATTR_NAME,
     ATTR_PORT,
@@ -26,7 +26,7 @@ from ..const import (
     ATTR_WATCHDOG,
     CRYPTO_AES128,
     FOLDER_ADDONS,
-    FOLDER_HOMEASSISTANT,
+    FOLDER_OPENPEERPOWER,
     FOLDER_MEDIA,
     FOLDER_SHARE,
     FOLDER_SSL,
@@ -42,7 +42,7 @@ from ..validate import (
 )
 
 ALL_FOLDERS = [
-    FOLDER_HOMEASSISTANT,
+    FOLDER_OPENPEERPOWER,
     FOLDER_SHARE,
     FOLDER_ADDONS,
     FOLDER_SSL,
@@ -70,7 +70,7 @@ SCHEMA_SNAPSHOT = vol.Schema(
             vol.Coerce(str), vol.Length(min=1, max=1)
         ),
         vol.Inclusive(ATTR_CRYPTO, "encrypted"): CRYPTO_AES128,
-        vol.Optional(ATTR_HOMEASSISTANT, default=dict): vol.Schema(
+        vol.Optional(ATTR_OPENPEERPOWER, default=dict): vol.Schema(
             {
                 vol.Optional(ATTR_VERSION): version_tag,
                 vol.Optional(ATTR_IMAGE): docker_image,

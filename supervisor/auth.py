@@ -7,7 +7,7 @@ from typing import Dict, Optional
 from .addons.addon import Addon
 from .const import ATTR_ADDON, ATTR_PASSWORD, ATTR_USERNAME, FILE_OPPIO_AUTH
 from .coresys import CoreSys, CoreSysAttributes
-from .exceptions import AuthError, AuthPasswordResetError, HomeAssistantAPIError
+from .exceptions import AuthError, AuthPasswordResetError, OpenPeerPowerAPIError
 from .utils.json import JsonConfig
 from .validate import SCHEMA_AUTH_CONFIG
 
@@ -73,7 +73,7 @@ class Auth(JsonConfig, CoreSysAttributes):
 
         # Check API state
         if not await self.sys_openpeerpower.api.check_api_state():
-            _LOGGER.debug("Open Peer Power not running, checking cache")
+            _LOGGER.info("Open Peer Power not running, checking cache")
             return cache_hit is True
 
         # No cache hit
@@ -110,7 +110,7 @@ class Auth(JsonConfig, CoreSysAttributes):
                 _LOGGER.warning("Unauthorized login for '%s'", username)
                 self._dismatch_cache(username, password)
                 return False
-        except HomeAssistantAPIError:
+        except OpenPeerPowerAPIError:
             _LOGGER.error("Can't request auth on Open Peer Power!")
         finally:
             self._running.pop(username, None)
@@ -130,7 +130,7 @@ class Auth(JsonConfig, CoreSysAttributes):
                     return
 
                 _LOGGER.warning("The user '%s' is not registered", username)
-        except HomeAssistantAPIError:
+        except OpenPeerPowerAPIError:
             _LOGGER.error("Can't request password reset on Open Peer Power!")
 
         raise AuthPasswordResetError()

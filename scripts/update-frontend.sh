@@ -5,7 +5,7 @@ set -e
 git submodule update --init --recursive --remote
 
 [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
-cd openpeerpower-polymer
+cd open-peer-power-polymer
 nvm install
 script/bootstrap
 

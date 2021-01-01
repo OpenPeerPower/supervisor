@@ -12,7 +12,7 @@ from voluptuous.humanize import humanize_error
 
 from ..const import ATTR_CONFIG, ATTR_DISCOVERY, FILE_OPPIO_DISCOVERY
 from ..coresys import CoreSys, CoreSysAttributes
-from ..exceptions import DiscoveryError, HomeAssistantAPIError
+from ..exceptions import DiscoveryError, OpenPeerPowerAPIError
 from ..utils.json import JsonConfig
 from .validate import SCHEMA_DISCOVERY_CONFIG, valid_discovery_config
 
@@ -126,7 +126,7 @@ class Discovery(CoreSysAttributes, JsonConfig):
         data = attr.asdict(message)
         data.pop(ATTR_CONFIG)
 
-        with suppress(HomeAssistantAPIError):
+        with suppress(OpenPeerPowerAPIError):
             async with self.sys_openpeerpower.api.make_request(
                 command,
                 f"api/oppio_push/discovery/{message.uuid}",

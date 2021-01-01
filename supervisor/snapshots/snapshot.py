@@ -23,7 +23,7 @@ from ..const import (
     ATTR_DATE,
     ATTR_DOCKER,
     ATTR_FOLDERS,
-    ATTR_HOMEASSISTANT,
+    ATTR_OPENPEERPOWER,
     ATTR_IMAGE,
     ATTR_NAME,
     ATTR_PASSWORD,
@@ -41,7 +41,7 @@ from ..const import (
     ATTR_WAIT_BOOT,
     ATTR_WATCHDOG,
     CRYPTO_AES128,
-    FOLDER_HOMEASSISTANT,
+    FOLDER_OPENPEERPOWER,
 )
 from ..coresys import CoreSys, CoreSysAttributes
 from ..exceptions import AddonsError
@@ -53,7 +53,7 @@ from .validate import ALL_FOLDERS, SCHEMA_SNAPSHOT
 _LOGGER: logging.Logger = logging.getLogger(__name__)
 
 MAP_FOLDER_EXCLUDE = {
-    FOLDER_HOMEASSISTANT: [
+    FOLDER_OPENPEERPOWER: [
         "*.db-wal",
         "*.db-shm",
         "__pycache__/*",
@@ -128,12 +128,12 @@ class Snapshot(CoreSysAttributes):
     @property
     def openpeerpower_version(self):
         """Return snapshot Open Peer Power version."""
-        return self._data[ATTR_HOMEASSISTANT].get(ATTR_VERSION)
+        return self._data[ATTR_OPENPEERPOWER].get(ATTR_VERSION)
 
     @property
     def openpeerpower(self):
         """Return snapshot Open Peer Power data."""
-        return self._data[ATTR_HOMEASSISTANT]
+        return self._data[ATTR_OPENPEERPOWER]
 
     @property
     def docker(self):

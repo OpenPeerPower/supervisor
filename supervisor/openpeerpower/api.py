@@ -9,13 +9,13 @@ import aiohttp
 from aiohttp import hdrs
 
 from ..coresys import CoreSys, CoreSysAttributes
-from ..exceptions import HomeAssistantAPIError, HomeAssistantAuthError
+from ..exceptions import OpenPeerPowerAPIError, OpenPeerPowerAuthError
 from ..utils import check_port
 
 _LOGGER: logging.Logger = logging.getLogger(__name__)
 
 
-class HomeAssistantAPI(CoreSysAttributes):
+class OpenPeerPowerAPI(CoreSysAttributes):
     """Open Peer Power core object for handle it."""
 
     def __init__(self, coresys: CoreSys):
@@ -45,7 +45,7 @@ class HomeAssistantAPI(CoreSysAttributes):
             ) as resp:
                 if resp.status != 200:
                     _LOGGER.error("Can't update Open Peer Power access token!")
-                    raise HomeAssistantAuthError()
+                    raise OpenPeerPowerAuthError()
 
                 _LOGGER.info("Updated Open Peer Power API token")
                 tokens = await resp.json()
@@ -97,7 +97,7 @@ class HomeAssistantAPI(CoreSysAttributes):
                 _LOGGER.error("Error on call %s: %s", url, err)
                 break
 
-        raise HomeAssistantAPIError()
+        raise OpenPeerPowerAPIError()
 
     async def check_api_state(self) -> bool:
         """Return True if Open Peer Power up and running."""
@@ -110,7 +110,7 @@ class HomeAssistantAPI(CoreSysAttributes):
             return False
 
         # Check if API is up
-        with suppress(HomeAssistantAPIError):
+        with suppress(OpenPeerPowerAPIError):
             async with self.make_request("get", "api/config") as resp:
                 if resp.status in (200, 201):
                     data = await resp.json()

@@ -36,7 +36,7 @@ class APIDiscovery(CoreSysAttributes):
     def _check_permission_ha(self, request):
         """Check permission for API call / Open Peer Power."""
         if request[REQUEST_FROM] != self.sys_openpeerpower:
-            raise APIForbidden("Only HomeAssistant can use this API!")
+            raise APIForbidden("Only OpenPeerPower can use this API!")
 
     @api_process
     async def list(self, request):
@@ -83,7 +83,7 @@ class APIDiscovery(CoreSysAttributes):
         """Read data into a discovery message."""
         message = self._extract_message(request)
 
-        # HomeAssistant?
+        # OpenPeerPower?
         self._check_permission_ha(request)
 
         return {

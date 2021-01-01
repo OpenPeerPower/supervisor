@@ -10,7 +10,7 @@ from ..const import (
     ROLE_ADMIN,
     ROLE_BACKUP,
     ROLE_DEFAULT,
-    ROLE_HOMEASSISTANT,
+    ROLE_OPENPEERPOWER,
     ROLE_MANAGER,
     CoreState,
 )
@@ -67,7 +67,7 @@ ADDONS_ROLE_ACCESS = {
         r"|/addons"
         r")$"
     ),
-    ROLE_HOMEASSISTANT: re.compile(
+    ROLE_OPENPEERPOWER: re.compile(
         r"^(?:"
         r"|/core/.+"
         r"|/openpeerpower/.+"
@@ -87,6 +87,7 @@ ADDONS_ROLE_ACCESS = {
         r"|/core/.+"
         r"|/dns/.+"
         r"|/docker/.+"
+        r"|/jobs/.+"
         r"|/hardware/.+"
         r"|/oppos/.+"
         r"|/openpeerpower/.+"

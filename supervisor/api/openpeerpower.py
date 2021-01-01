@@ -57,7 +57,7 @@ SCHEMA_OPTIONS = vol.Schema(
 SCHEMA_VERSION = vol.Schema({vol.Optional(ATTR_VERSION): version_tag})
 
 
-class APIHomeAssistant(CoreSysAttributes):
+class APIOpenPeerPower(CoreSysAttributes):
     """Handle RESTful API for Open Peer Power functions."""
 
     @api_process

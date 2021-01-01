@@ -15,7 +15,7 @@ _LOGGER: logging.Logger = logging.getLogger(__name__)
 OPP_DOCKER_NAME = "openpeerpower"
 
 
-class DockerHomeAssistant(DockerInterface):
+class DockerOpenPeerPower(DockerInterface):
     """Docker Supervisor wrapper for Open Peer Power."""
 
     @property
@@ -107,7 +107,7 @@ class DockerHomeAssistant(DockerInterface):
         # Create & Run container
         docker_container = self.sys_docker.run(
             self.image,
-            version=self.sys_openpeerpower.version,
+            tag=self.sys_openpeerpower.version.string,
             name=self.name,
             hostname=self.name,
             detach=True,

@@ -2,12 +2,19 @@
 import os
 from unittest.mock import patch
 
+from awesomeversion import AwesomeVersion
 import pytest
 
 from supervisor.const import SUPERVISOR_VERSION, CoreState
 from supervisor.exceptions import AddonConfigurationError
 from supervisor.misc.filter import filter_data
-from supervisor.resolution.const import UnsupportedReason
+from supervisor.resolution.const import (
+    ContextType,
+    IssueType,
+    SuggestionType,
+    UnhealthyReason,
+    UnsupportedReason,
+)
 
 SAMPLE_EVENT = {"sample": "event", "extra": {"Test": "123"}}
 
@@ -67,7 +74,9 @@ def test_defaults(coresys):
     assert ["installation_type", "supervised"] in filtered["tags"]
     assert filtered["contexts"]["host"]["arch"] == "amd64"
     assert filtered["contexts"]["host"]["machine"] == "qemux86-64"
-    assert filtered["contexts"]["versions"]["supervisor"] == SUPERVISOR_VERSION
+    assert filtered["contexts"]["versions"]["supervisor"] == AwesomeVersion(
+        SUPERVISOR_VERSION
+    )
     assert filtered["user"]["id"] == coresys.machine_id
 
 

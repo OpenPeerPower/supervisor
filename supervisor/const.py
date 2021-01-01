@@ -5,14 +5,9 @@ from pathlib import Path
 
 SUPERVISOR_VERSION = "DEV"
 
-URL_OPPIO_ADDONS = "https://github.com/openpeerpower/oppio-addons"
-URL_OPPIO_APPARMOR = "https://version.openpeerpower.io/apparmor.txt"
-URL_OPPIO_VERSION = "https://version.openpeerpower.io/{channel}.json"
-
-URL_OPPOS_OTA = (
-    "https://github.com/openpeerpower/operating-system/releases/download/"
-    "{version}/oppos_{board}-{version}.raucb"
-)
+URL_OPPIO_ADDONS = "https://github.com/open-peer-power/addons"
+URL_OPPIO_APPARMOR = "https://version.open-peer-power.io/apparmor.txt"
+URL_OPPIO_VERSION = "https://version.open-peer-power.io/{channel}.json"
 
 SUPERVISOR_DATA = Path("/data")
 
@@ -21,7 +16,7 @@ FILE_OPPIO_AUTH = Path(SUPERVISOR_DATA, "auth.json")
 FILE_OPPIO_CONFIG = Path(SUPERVISOR_DATA, "config.json")
 FILE_OPPIO_DISCOVERY = Path(SUPERVISOR_DATA, "discovery.json")
 FILE_OPPIO_DOCKER = Path(SUPERVISOR_DATA, "docker.json")
-FILE_OPPIO_HOMEASSISTANT = Path(SUPERVISOR_DATA, "openpeerpower.json")
+FILE_OPPIO_OPENPEERPOWER = Path(SUPERVISOR_DATA, "openpeerpower.json")
 FILE_OPPIO_INGRESS = Path(SUPERVISOR_DATA, "ingress.json")
 FILE_OPPIO_SERVICES = Path(SUPERVISOR_DATA, "services.json")
 FILE_OPPIO_UPDATER = Path(SUPERVISOR_DATA, "updater.json")
@@ -34,11 +29,6 @@ RUN_SUPERVISOR_STATE = Path("/run/supervisor")
 DOCKER_NETWORK = "oppio"
 DOCKER_NETWORK_MASK = ip_network("172.30.32.0/23")
 DOCKER_NETWORK_RANGE = ip_network("172.30.33.0/24")
-DOCKER_IMAGE_DENYLIST = [
-    "containrrr/watchtower",
-    "pyouroboros/ouroboros",
-    "v2tec/watchtower",
-]
 
 DNS_SUFFIX = "local.opp.io"
 
@@ -48,7 +38,7 @@ LABEL_TYPE = "io.opp.type"
 LABEL_VERSION = "io.opp.version"
 
 META_ADDON = "addon"
-META_HOMEASSISTANT = "openpeerpower"
+META_OPENPEERPOWER = "openpeerpower"
 META_SUPERVISOR = "supervisor"
 
 JSON_DATA = "data"
@@ -73,7 +63,7 @@ ENV_TIME = "TZ"
 ENV_TOKEN = "SUPERVISOR_TOKEN"
 ENV_TOKEN_OPPIO = "OPPIO_TOKEN"
 
-ENV_HOMEASSISTANT_REPOSITORY = "HOMEASSISTANT_REPOSITORY"
+ENV_OPENPEERPOWER_REPOSITORY = "OPENPEERPOWER_REPOSITORY"
 ENV_SUPERVISOR_DEV = "SUPERVISOR_DEV"
 ENV_SUPERVISOR_MACHINE = "SUPERVISOR_MACHINE"
 ENV_SUPERVISOR_NAME = "SUPERVISOR_NAME"
@@ -153,17 +143,18 @@ ATTR_OPPIO_API = "oppio_api"
 ATTR_OPPIO_ROLE = "oppio_role"
 ATTR_OPPOS = "oppos"
 ATTR_HEALTHY = "healthy"
-ATTR_HOMEASSISTANT = "openpeerpower"
-ATTR_HOMEASSISTANT_API = "openpeerpower_api"
+ATTR_OPENPEERPOWER = "openpeerpower"
+ATTR_OPENPEERPOWER_API = "openpeerpower_api"
 ATTR_HOST = "host"
 ATTR_HOST_DBUS = "host_dbus"
+ATTR_HOST_INTERNET = "host_internet"
 ATTR_HOST_IPC = "host_ipc"
 ATTR_HOST_NETWORK = "host_network"
 ATTR_HOST_PID = "host_pid"
 ATTR_HOSTNAME = "hostname"
 ATTR_ICON = "icon"
-ATTR_ISSUES = "issues"
 ATTR_ID = "id"
+ATTR_ISSUES = "issues"
 ATTR_IMAGE = "image"
 ATTR_IMAGES = "images"
 ATTR_INDEX = "index"
@@ -181,6 +172,7 @@ ATTR_INTERFACE = "interface"
 ATTR_INTERFACES = "interfaces"
 ATTR_IP_ADDRESS = "ip_address"
 ATTR_IPV4 = "ipv4"
+ATTR_IPV6 = "ipv6"
 ATTR_KERNEL = "kernel"
 ATTR_KERNEL_MODULES = "kernel_modules"
 ATTR_LAST_BOOT = "last_boot"
@@ -198,7 +190,6 @@ ATTR_MEMORY_PERCENT = "memory_percent"
 ATTR_MEMORY_USAGE = "memory_usage"
 ATTR_MESSAGE = "message"
 ATTR_METHOD = "method"
-ATTR_METHODS = ["dhcp", "static"]
 ATTR_MODE = "mode"
 ATTR_MULTICAST = "multicast"
 ATTR_NAME = "name"
@@ -215,6 +206,7 @@ ATTR_PANEL_ICON = "panel_icon"
 ATTR_PANEL_TITLE = "panel_title"
 ATTR_PANELS = "panels"
 ATTR_PASSWORD = "password"
+ATTR_PARENT = "parent"
 ATTR_PORT = "port"
 ATTR_PORTS = "ports"
 ATTR_PORTS_DESCRIPTION = "ports_description"
@@ -227,6 +219,7 @@ ATTR_PROVIDERS = "providers"
 ATTR_RATING = "rating"
 ATTR_REFRESH_TOKEN = "refresh_token"
 ATTR_REGISTRIES = "registries"
+ATTR_REGISTRY = "registry"
 ATTR_REPOSITORIES = "repositories"
 ATTR_REPOSITORY = "repository"
 ATTR_SCHEMA = "schema"
@@ -252,6 +245,7 @@ ATTR_STDIN = "stdin"
 ATTR_STORAGE = "storage"
 ATTR_SUGGESTIONS = "suggestions"
 ATTR_SUPERVISOR = "supervisor"
+ATTR_SUPERVISOR_INTERNET = "supervisor_internet"
 ATTR_SUPPORTED = "supported"
 ATTR_SUPPORTED_ARCH = "supported_arch"
 ATTR_SYSTEM = "system"
@@ -281,6 +275,19 @@ ATTR_WATCHDOG = "watchdog"
 ATTR_WEBUI = "webui"
 ATTR_OBSERVER = "observer"
 ATTR_UPDATE_AVAILABLE = "update_available"
+ATTR_WIFI = "wifi"
+ATTR_VLAN = "vlan"
+ATTR_SSD = "ssid"
+ATTR_AUTH = "auth"
+ATTR_PSK = "psk"
+ATTR_CONNECTED = "connected"
+ATTR_ENABLED = "enabled"
+ATTR_SIGNAL = "signal"
+ATTR_MAC = "mac"
+ATTR_FREQUENCY = "frequency"
+ATTR_ACCESSPOINTS = "accesspoints"
+ATTR_UNHEALTHY = "unhealthy"
+ATTR_OTA = "ota"
 
 PROVIDE_SERVICE = "provide"
 NEED_SERVICE = "need"
@@ -305,7 +312,7 @@ ARCH_ALL = [ARCH_ARMHF, ARCH_ARMV7, ARCH_AARCH64, ARCH_AMD64, ARCH_I386]
 REPOSITORY_CORE = "core"
 REPOSITORY_LOCAL = "local"
 
-FOLDER_HOMEASSISTANT = "openpeerpower"
+FOLDER_OPENPEERPOWER = "openpeerpower"
 FOLDER_SHARE = "share"
 FOLDER_ADDONS = "addons/local"
 FOLDER_SSL = "ssl"
@@ -345,17 +352,15 @@ PRIVILEGED_ALL = [
 ]
 
 ROLE_DEFAULT = "default"
-ROLE_HOMEASSISTANT = "openpeerpower"
+ROLE_OPENPEERPOWER = "openpeerpower"
 ROLE_BACKUP = "backup"
 ROLE_MANAGER = "manager"
 ROLE_ADMIN = "admin"
 
-ROLE_ALL = [ROLE_DEFAULT, ROLE_HOMEASSISTANT, ROLE_BACKUP, ROLE_MANAGER, ROLE_ADMIN]
+ROLE_ALL = [ROLE_DEFAULT, ROLE_OPENPEERPOWER, ROLE_BACKUP, ROLE_MANAGER, ROLE_ADMIN]
 
 CHAN_ID = "chan_id"
 CHAN_TYPE = "chan_type"
-
-SUPERVISED_SUPPORTED_OS = ["Debian GNU/Linux 10 (buster)"]
 
 
 class AddonBoot(str, Enum):

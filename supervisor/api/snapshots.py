@@ -13,7 +13,7 @@ from ..const import (
     ATTR_ADDONS,
     ATTR_DATE,
     ATTR_FOLDERS,
-    ATTR_HOMEASSISTANT,
+    ATTR_OPENPEERPOWER,
     ATTR_NAME,
     ATTR_PASSWORD,
     ATTR_PROTECTED,
@@ -38,7 +38,7 @@ RE_SLUGIFY_NAME = re.compile(r"[^A-Za-z0-9]+")
 SCHEMA_RESTORE_PARTIAL = vol.Schema(
     {
         vol.Optional(ATTR_PASSWORD): vol.Any(None, vol.Coerce(str)),
-        vol.Optional(ATTR_HOMEASSISTANT): vol.Boolean(),
+        vol.Optional(ATTR_OPENPEERPOWER): vol.Boolean(),
         vol.Optional(ATTR_ADDONS): vol.All([vol.Coerce(str)], vol.Unique()),
         vol.Optional(ATTR_FOLDERS): vol.All([vol.In(ALL_FOLDERS)], vol.Unique()),
     }
@@ -119,7 +119,7 @@ class APISnapshots(CoreSysAttributes):
             ATTR_DATE: snapshot.date,
             ATTR_SIZE: snapshot.size,
             ATTR_PROTECTED: snapshot.protected,
-            ATTR_HOMEASSISTANT: snapshot.openpeerpower_version,
+            ATTR_OPENPEERPOWER: snapshot.openpeerpower_version,
             ATTR_ADDONS: data_addons,
             ATTR_REPOSITORIES: snapshot.repositories,
             ATTR_FOLDERS: snapshot.folders,

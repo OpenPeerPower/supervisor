@@ -9,27 +9,38 @@ class OppioNotSupportedError(OppioError):
     """Function is not supported."""
 
 
-# HomeAssistant
+# JobManager
 
 
-class HomeAssistantError(OppioError):
+class JobException(OppioError):
+    """Base job exception."""
+
+
+# OpenPeerPower
+
+
+class OpenPeerPowerError(OppioError):
     """Open Peer Power exception."""
 
 
-class HomeAssistantUpdateError(HomeAssistantError):
+class OpenPeerPowerUpdateError(OpenPeerPowerError):
     """Error on update of a Open Peer Power."""
 
 
-class HomeAssistantCrashError(HomeAssistantError):
+class OpenPeerPowerCrashError(OpenPeerPowerError):
     """Error on crash of a Open Peer Power startup."""
 
 
-class HomeAssistantAPIError(HomeAssistantError):
+class OpenPeerPowerAPIError(OpenPeerPowerError):
     """Open Peer Power API exception."""
 
 
-class HomeAssistantAuthError(HomeAssistantAPIError):
+class OpenPeerPowerAuthError(OpenPeerPowerAPIError):
     """Open Peer Power Auth API exception."""
+
+
+class OpenPeerPowerJobError(OpenPeerPowerError, JobException):
+    """Raise on Open Peer Power job error."""
 
 
 # Supervisor
@@ -41,6 +52,10 @@ class SupervisorError(OppioError):
 
 class SupervisorUpdateError(SupervisorError):
     """Supervisor update error."""
+
+
+class SupervisorJobError(SupervisorError, JobException):
+    """Raise on job errors."""
 
 
 # OppOS
@@ -128,6 +143,10 @@ class AddonsNotSupportedError(OppioNotSupportedError):
     """Addons don't support a function."""
 
 
+class AddonsJobError(AddonsError, JobException):
+    """Raise on job errors."""
+
+
 # Arch
 
 
@@ -138,8 +157,12 @@ class OppioArchNotFound(OppioNotSupportedError):
 # Updater
 
 
-class OppioUpdaterError(OppioError):
+class UpdaterError(OppioError):
     """Error on Updater."""
+
+
+class UpdaterJobError(UpdaterError, JobException):
+    """Raise on job error."""
 
 
 # Auth
@@ -170,6 +193,14 @@ class HostServiceError(HostError):
 
 class HostAppArmorError(HostError):
     """Host apparmor functions failed."""
+
+
+class HostNetworkError(HostError):
+    """Error with host network."""
+
+
+class HostNetworkNotFound(HostError):
+    """Return if host interface is not found."""
 
 
 # API
@@ -215,6 +246,10 @@ class DBusFatalError(DBusError):
 
 class DBusParseError(DBusError):
     """DBus parse error."""
+
+
+class DBusProgramError(DBusError):
+    """DBus application error."""
 
 
 # util/apparmor
@@ -281,3 +316,30 @@ class ResolutionError(OppioError):
 
 class ResolutionNotFound(ResolutionError):
     """Raise if suggestion/issue was not found."""
+
+
+class ResolutionFixupError(OppioError):
+    """Rasie if a fixup fails."""
+
+
+class ResolutionFixupJobError(ResolutionFixupError, JobException):
+    """Raise on job error."""
+
+
+# Store
+
+
+class StoreError(OppioError):
+    """Raise if an error on store is happening."""
+
+
+class StoreGitError(StoreError):
+    """Raise if something on git is happening."""
+
+
+class StoreNotFound(StoreError):
+    """Raise if slug is not known."""
+
+
+class StoreJobError(StoreError, JobException):
+    """Raise on job error with git."""

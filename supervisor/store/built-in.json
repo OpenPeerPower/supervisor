@@ -1,12 +1,12 @@
 {
     "local": {
         "name": "Local add-ons",
-        "url": "https://openpeerpower.io/oppio",
+        "url": "https://open-peer-power.io/oppio",
         "maintainer": "you"
     },
     "core": {
         "name": "Official add-ons",
-        "url": "https://openpeerpower.io/addons",
+        "url": "https://open-peer-power.io/addons",
         "maintainer": "Open Peer Power"
     }
 }

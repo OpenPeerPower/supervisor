@@ -6,14 +6,13 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 import attr
+from awesomeversion import AwesomeVersion
 import docker
-from packaging import version as pkg_version
 import requests
 
 from ..const import (
     ATTR_REGISTRIES,
     DNS_SUFFIX,
-    DOCKER_IMAGE_DENYLIST,
     DOCKER_NETWORK,
     FILE_OPPIO_DOCKER,
     SOCKET_DOCKER,
@@ -41,37 +40,26 @@ class CommandReturn:
 class DockerInfo:
     """Return docker information."""
 
-    version: str = attr.ib()
+    version: AwesomeVersion = attr.ib()
     storage: str = attr.ib()
     logging: str = attr.ib()
 
     @staticmethod
     def new(data: Dict[str, Any]):
         """Create a object from docker info."""
-        return DockerInfo(data["ServerVersion"], data["Driver"], data["LoggingDriver"])
+        return DockerInfo(
+            AwesomeVersion(data["ServerVersion"]), data["Driver"], data["LoggingDriver"]
+        )
 
     @property
     def supported_version(self) -> bool:
         """Return true, if docker version is supported."""
-        version_local = pkg_version.parse(self.version)
-        version_min = pkg_version.parse(MIN_SUPPORTED_DOCKER)
-
-        return version_local >= version_min
+        return self.version >= MIN_SUPPORTED_DOCKER
 
     @property
     def inside_lxc(self) -> bool:
         """Return True if the docker run inside lxc."""
         return Path("/dev/lxd/sock").exists()
-
-    def check_requirements(self) -> None:
-        """Show wrong configurations."""
-        if self.storage != "overlay2":
-            _LOGGER.error("Docker storage driver %s is not supported!", self.storage)
-
-        if self.logging != "journald":
-            _LOGGER.error("Docker logging driver %s is not supported!", self.logging)
-
-        return self.storage != "overlay2" or self.logging != "journald"
 
 
 class DockerConfig(JsonConfig):
@@ -125,7 +113,7 @@ class DockerAPI:
     def run(
         self,
         image: str,
-        version: str = "latest",
+        tag: str = "latest",
         dns: bool = True,
         ipv4: Optional[IPv4Address] = None,
         **kwargs: Any,
@@ -151,7 +139,7 @@ class DockerAPI:
         # Create container
         try:
             container = self.docker.containers.create(
-                f"{image}:{version}", use_config_proxy=False, **kwargs
+                f"{image}:{tag}", use_config_proxy=False, **kwargs
             )
         except docker.errors.NotFound as err:
             _LOGGER.error("Image %s not exists for %s", image, name)
@@ -206,7 +194,7 @@ class DockerAPI:
     def run_command(
         self,
         image: str,
-        version: str = "latest",
+        tag: str = "latest",
         command: Optional[str] = None,
         **kwargs: Any,
     ) -> CommandReturn:
@@ -221,7 +209,7 @@ class DockerAPI:
         container = None
         try:
             container = self.docker.containers.run(
-                f"{image}:{version}",
+                f"{image}:{tag}",
                 command=command,
                 network=self.network.name,
                 use_config_proxy=False,
@@ -317,29 +305,3 @@ class DockerAPI:
 
             with suppress(docker.errors.DockerException, requests.RequestException):
                 network.disconnect(data.get("Name", cid), force=True)
-
-    def check_denylist_images(self) -> bool:
-        """Return a boolean if the host has images in the denylist."""
-        denied_images = set()
-
-        try:
-            for image in self.images.list():
-                for tag in image.tags:
-                    image_name = tag.split(":")[0]
-                    if (
-                        image_name in DOCKER_IMAGE_DENYLIST
-                        and image_name not in denied_images
-                    ):
-                        denied_images.add(image_name)
-        except (docker.errors.DockerException, requests.RequestException) as err:
-            _LOGGER.error("Corrupt docker overlayfs detect: %s", err)
-            raise DockerError() from err
-
-        if not denied_images:
-            return False
-
-        _LOGGER.error(
-            "Found images: '%s' which are not supported, remove these from the host!",
-            ", ".join(denied_images),
-        )
-        return True

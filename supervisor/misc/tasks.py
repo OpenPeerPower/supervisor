@@ -1,18 +1,18 @@
 """A collection of tasks."""
 import logging
 
-from ..const import AddonState
+from ..const import AddonState, HostFeature
 from ..coresys import CoreSysAttributes
 from ..exceptions import (
     AddonsError,
     AudioError,
     CliError,
     CoreDNSError,
-    HomeAssistantError,
+    OpenPeerPowerError,
     MulticastError,
     ObserverError,
 )
-from ..resolution.const import MINIMUM_FREE_SPACE_THRESHOLD, ContextType, IssueType
+from ..jobs.decorator import Job, JobCondition
 
 _LOGGER: logging.Logger = logging.getLogger(__name__)
 
@@ -32,8 +32,8 @@ RUN_RELOAD_HOST = 7600
 RUN_RELOAD_UPDATER = 7200
 RUN_RELOAD_INGRESS = 930
 
-RUN_WATCHDOG_HOMEASSISTANT_DOCKER = 15
-RUN_WATCHDOG_HOMEASSISTANT_API = 120
+RUN_WATCHDOG_OPENPEERPOWER_DOCKER = 15
+RUN_WATCHDOG_OPENPEERPOWER_API = 120
 
 RUN_WATCHDOG_DNS_DOCKER = 30
 RUN_WATCHDOG_AUDIO_DOCKER = 60
@@ -46,6 +46,8 @@ RUN_WATCHDOG_ADDON_APPLICATON = 120
 RUN_WATCHDOG_OBSERVER_APPLICATION = 180
 
 RUN_REFRESH_ADDON = 15
+
+RUN_CHECK_CONNECTIVITY = 30
 
 
 class Tasks(CoreSysAttributes):
@@ -78,10 +80,10 @@ class Tasks(CoreSysAttributes):
 
         # Watchdog
         self.sys_scheduler.register_task(
-            self._watchdog_openpeerpower_docker, RUN_WATCHDOG_HOMEASSISTANT_DOCKER
+            self._watchdog_openpeerpower_docker, RUN_WATCHDOG_OPENPEERPOWER_DOCKER
         )
         self.sys_scheduler.register_task(
-            self._watchdog_openpeerpower_api, RUN_WATCHDOG_HOMEASSISTANT_API
+            self._watchdog_openpeerpower_api, RUN_WATCHDOG_OPENPEERPOWER_API
         )
         self.sys_scheduler.register_task(
             self._watchdog_dns_docker, RUN_WATCHDOG_DNS_DOCKER
@@ -111,8 +113,21 @@ class Tasks(CoreSysAttributes):
         # Refresh
         self.sys_scheduler.register_task(self._refresh_addon, RUN_REFRESH_ADDON)
 
+        # Connectivity
+        self.sys_scheduler.register_task(
+            self._check_connectivity, RUN_CHECK_CONNECTIVITY
+        )
+
         _LOGGER.info("All core tasks are scheduled")
 
+    @Job(
+        conditions=[
+            JobCondition.HEALTHY,
+            JobCondition.FREE_SPACE,
+            JobCondition.INTERNET_HOST,
+            JobCondition.RUNNING,
+        ]
+    )
     async def _update_addons(self):
         """Check if an update is available for an Add-on and update it."""
         for addon in self.sys_addons.all:
@@ -128,17 +143,6 @@ class Tasks(CoreSysAttributes):
                 )
                 continue
 
-            # Check free space
-            if self.sys_host.info.free_space < MINIMUM_FREE_SPACE_THRESHOLD:
-                _LOGGER.warning(
-                    "Not enough free space, pausing add-on updates - available space %f",
-                    self.sys_host.info.free_space,
-                )
-                self.sys_resolution.create_issue(
-                    IssueType.FREE_SPACE, ContextType.SYSTEM
-                )
-                return
-
             # Run Add-on update sequential
             # avoid issue on slow IO
             _LOGGER.info("Add-on auto update process %s", addon.slug)
@@ -147,18 +151,16 @@ class Tasks(CoreSysAttributes):
             except AddonsError:
                 _LOGGER.error("Can't auto update Add-on %s", addon.slug)
 
+    @Job(
+        conditions=[
+            JobCondition.FREE_SPACE,
+            JobCondition.INTERNET_HOST,
+            JobCondition.RUNNING,
+        ]
+    )
     async def _update_supervisor(self):
         """Check and run update of Supervisor Supervisor."""
         if not self.sys_supervisor.need_update:
-            return
-
-        # Check free space
-        if self.sys_host.info.free_space < MINIMUM_FREE_SPACE_THRESHOLD:
-            _LOGGER.warning(
-                "Not enough free space, pausing supervisor update - available space %s",
-                self.sys_host.info.free_space,
-            )
-            self.sys_resolution.create_issue(IssueType.FREE_SPACE, ContextType.SYSTEM)
             return
 
         _LOGGER.info(
@@ -187,7 +189,7 @@ class Tasks(CoreSysAttributes):
         _LOGGER.warning("Watchdog found a problem with Open Peer Power Docker!")
         try:
             await self.sys_openpeerpower.core.start()
-        except HomeAssistantError as err:
+        except OpenPeerPowerError as err:
             _LOGGER.error("Open Peer Power watchdog reanimation failed!")
             self.sys_capture_exception(err)
         else:
@@ -230,12 +232,13 @@ class Tasks(CoreSysAttributes):
         _LOGGER.error("Watchdog found a problem with Open Peer Power API!")
         try:
             await self.sys_openpeerpower.core.restart()
-        except HomeAssistantError as err:
+        except OpenPeerPowerError as err:
             _LOGGER.error("Open Peer Power watchdog reanimation failed!")
             self.sys_capture_exception(err)
         finally:
             self._cache[OPP_WATCHDOG_API] = 0
 
+    @Job(conditions=JobCondition.RUNNING)
     async def _update_cli(self):
         """Check and run update of cli."""
         if not self.sys_plugins.cli.need_update:
@@ -246,6 +249,7 @@ class Tasks(CoreSysAttributes):
         )
         await self.sys_plugins.cli.update()
 
+    @Job(conditions=JobCondition.RUNNING)
     async def _update_dns(self):
         """Check and run update of CoreDNS plugin."""
         if not self.sys_plugins.dns.need_update:
@@ -257,6 +261,7 @@ class Tasks(CoreSysAttributes):
         )
         await self.sys_plugins.dns.update()
 
+    @Job(conditions=JobCondition.RUNNING)
     async def _update_audio(self):
         """Check and run update of PulseAudio plugin."""
         if not self.sys_plugins.audio.need_update:
@@ -268,6 +273,7 @@ class Tasks(CoreSysAttributes):
         )
         await self.sys_plugins.audio.update()
 
+    @Job(conditions=JobCondition.RUNNING)
     async def _update_observer(self):
         """Check and run update of Observer plugin."""
         if not self.sys_plugins.observer.need_update:
@@ -279,6 +285,7 @@ class Tasks(CoreSysAttributes):
         )
         await self.sys_plugins.observer.update()
 
+    @Job(conditions=JobCondition.RUNNING)
     async def _update_multicast(self):
         """Check and run update of multicast."""
         if not self.sys_plugins.multicast.need_update:
@@ -440,3 +447,29 @@ class Tasks(CoreSysAttributes):
 
             # Adjust state
             addon.state = AddonState.STOPPED
+
+    async def _check_connectivity(self) -> None:
+        """Check system connectivity."""
+        value = self._cache.get("connectivity", 0)
+
+        # Need only full check if not connected or each 10min
+        if value >= 600:
+            pass
+        elif (
+            self.sys_supervisor.connectivity
+            and self.sys_host.network.connectivity is None
+        ) or (
+            self.sys_supervisor.connectivity
+            and self.sys_host.network.connectivity is not None
+            and self.sys_host.network.connectivity
+        ):
+            self._cache["connectivity"] = value + RUN_CHECK_CONNECTIVITY
+            return
+
+        # Check connectivity
+        try:
+            await self.sys_supervisor.check_connectivity()
+            if HostFeature.NETWORK in self.sys_host.features:
+                await self.sys_host.network.check_connectivity()
+        finally:
+            self._cache["connectivity"] = 0

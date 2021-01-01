@@ -10,7 +10,7 @@ from ..const import (
     ATTR_DOCKER,
     ATTR_FEATURES,
     ATTR_OPPOS,
-    ATTR_HOMEASSISTANT,
+    ATTR_OPENPEERPOWER,
     ATTR_HOSTNAME,
     ATTR_LOGGING,
     ATTR_MACHINE,
@@ -34,12 +34,12 @@ class APIInfo(CoreSysAttributes):
         """Show system info."""
         return {
             ATTR_SUPERVISOR: self.sys_supervisor.version,
-            ATTR_HOMEASSISTANT: self.sys_openpeerpower.version,
+            ATTR_OPENPEERPOWER: self.sys_openpeerpower.version,
             ATTR_OPPOS: self.sys_oppos.version,
             ATTR_DOCKER: self.sys_docker.info.version,
             ATTR_HOSTNAME: self.sys_host.info.hostname,
             ATTR_OPERATING_SYSTEM: self.sys_host.info.operating_system,
-            ATTR_FEATURES: self.sys_host.supported_features,
+            ATTR_FEATURES: self.sys_host.features,
             ATTR_MACHINE: self.sys_machine,
             ATTR_ARCH: self.sys_arch.default,
             ATTR_SUPPORTED_ARCH: self.sys_arch.supported,

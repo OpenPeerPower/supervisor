@@ -5,6 +5,8 @@ import os
 from pathlib import Path, PurePath
 from typing import List, Optional
 
+from awesomeversion import AwesomeVersion
+
 from .const import (
     ATTR_ADDONS_CUSTOM_LIST,
     ATTR_DEBUG,
@@ -26,7 +28,7 @@ from .validate import SCHEMA_SUPERVISOR_CONFIG
 
 _LOGGER: logging.Logger = logging.getLogger(__name__)
 
-HOMEASSISTANT_CONFIG = PurePath("openpeerpower")
+OPENPEERPOWER_CONFIG = PurePath("openpeerpower")
 
 OPPIO_SSL = PurePath("ssl")
 
@@ -64,12 +66,12 @@ class CoreConfig(JsonConfig):
         self._data[ATTR_TIMEZONE] = value
 
     @property
-    def version(self) -> str:
+    def version(self) -> AwesomeVersion:
         """Return config version."""
         return self._data[ATTR_VERSION]
 
     @version.setter
-    def version(self, value: str) -> None:
+    def version(self, value: AwesomeVersion) -> None:
         """Set config version."""
         self._data[ATTR_VERSION] = value
 
@@ -157,12 +159,12 @@ class CoreConfig(JsonConfig):
     @property
     def path_extern_openpeerpower(self) -> str:
         """Return config path external for Docker."""
-        return str(PurePath(self.path_extern_supervisor, HOMEASSISTANT_CONFIG))
+        return str(PurePath(self.path_extern_supervisor, OPENPEERPOWER_CONFIG))
 
     @property
     def path_openpeerpower(self) -> Path:
         """Return config path inside supervisor."""
-        return Path(SUPERVISOR_DATA, HOMEASSISTANT_CONFIG)
+        return Path(SUPERVISOR_DATA, OPENPEERPOWER_CONFIG)
 
     @property
     def path_extern_ssl(self) -> str:

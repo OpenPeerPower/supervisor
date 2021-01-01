@@ -7,6 +7,8 @@ import shutil
 from typing import Optional
 from uuid import UUID
 
+from awesomeversion import AwesomeVersion, AwesomeVersionException
+
 from ..const import (
     ATTR_ACCESS_TOKEN,
     ATTR_AUDIO_INPUT,
@@ -20,41 +22,41 @@ from ..const import (
     ATTR_VERSION,
     ATTR_WAIT_BOOT,
     ATTR_WATCHDOG,
-    FILE_OPPIO_HOMEASSISTANT,
+    FILE_OPPIO_OPENPEERPOWER,
 )
 from ..coresys import CoreSys, CoreSysAttributes
 from ..utils.json import JsonConfig
 from ..validate import SCHEMA_OPP_CONFIG
-from .api import HomeAssistantAPI
-from .core import HomeAssistantCore
-from .secrets import HomeAssistantSecrets
+from .api import OpenPeerPowerAPI
+from .core import OpenPeerPowerCore
+from .secrets import OpenPeerPowerSecrets
 
 _LOGGER: logging.Logger = logging.getLogger(__name__)
 
 
-class HomeAssistant(JsonConfig, CoreSysAttributes):
+class OpenPeerPower(JsonConfig, CoreSysAttributes):
     """Open Peer Power core object for handle it."""
 
     def __init__(self, coresys: CoreSys):
         """Initialize Open Peer Power object."""
-        super().__init__(FILE_OPPIO_HOMEASSISTANT, SCHEMA_OPP_CONFIG)
+        super().__init__(FILE_OPPIO_OPENPEERPOWER, SCHEMA_OPP_CONFIG)
         self.coresys: CoreSys = coresys
-        self._api: HomeAssistantAPI = HomeAssistantAPI(coresys)
-        self._core: HomeAssistantCore = HomeAssistantCore(coresys)
-        self._secrets: HomeAssistantSecrets = HomeAssistantSecrets(coresys)
+        self._api: OpenPeerPowerAPI = OpenPeerPowerAPI(coresys)
+        self._core: OpenPeerPowerCore = OpenPeerPowerCore(coresys)
+        self._secrets: OpenPeerPowerSecrets = OpenPeerPowerSecrets(coresys)
 
     @property
-    def api(self) -> HomeAssistantAPI:
+    def api(self) -> OpenPeerPowerAPI:
         """Return API handler for core."""
         return self._api
 
     @property
-    def core(self) -> HomeAssistantCore:
+    def core(self) -> OpenPeerPowerCore:
         """Return Core handler for docker."""
         return self._core
 
     @property
-    def secrets(self) -> HomeAssistantSecrets:
+    def secrets(self) -> OpenPeerPowerSecrets:
         """Return Secrets Manager for core."""
         return self._secrets
 
@@ -126,7 +128,7 @@ class HomeAssistant(JsonConfig, CoreSysAttributes):
         self._data[ATTR_WAIT_BOOT] = value
 
     @property
-    def latest_version(self) -> str:
+    def latest_version(self) -> Optional[AwesomeVersion]:
         """Return last available version of Open Peer Power."""
         return self.sys_updater.version_openpeerpower
 
@@ -143,12 +145,12 @@ class HomeAssistant(JsonConfig, CoreSysAttributes):
         self._data[ATTR_IMAGE] = value
 
     @property
-    def version(self) -> Optional[str]:
+    def version(self) -> Optional[AwesomeVersion]:
         """Return version of local version."""
         return self._data.get(ATTR_VERSION)
 
     @version.setter
-    def version(self, value: str) -> None:
+    def version(self, value: AwesomeVersion) -> None:
         """Set installed version."""
         self._data[ATTR_VERSION] = value
 
@@ -220,7 +222,10 @@ class HomeAssistant(JsonConfig, CoreSysAttributes):
     @property
     def need_update(self) -> bool:
         """Return true if a Open Peer Power update is available."""
-        return self.version != self.latest_version
+        try:
+            return self.version != self.latest_version
+        except (AwesomeVersionException, TypeError):
+            return False
 
     async def load(self) -> None:
         """Prepare Open Peer Power object."""

@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, Awaitable, Dict, List, Optional
 
-from packaging import version as pkg_version
+from awesomeversion import AwesomeVersion, AwesomeVersionException
 import voluptuous as vol
 
 from ..const import (
@@ -24,8 +24,8 @@ from ..const import (
     ATTR_GPIO,
     ATTR_OPPIO_API,
     ATTR_OPPIO_ROLE,
-    ATTR_HOMEASSISTANT,
-    ATTR_HOMEASSISTANT_API,
+    ATTR_OPENPEERPOWER,
+    ATTR_OPENPEERPOWER_API,
     ATTR_HOST_DBUS,
     ATTR_HOST_IPC,
     ATTR_HOST_NETWORK,
@@ -183,12 +183,12 @@ class AddonModel(CoreSysAttributes, ABC):
         return self.data[ATTR_REPOSITORY]
 
     @property
-    def latest_version(self) -> str:
+    def latest_version(self) -> AwesomeVersion:
         """Return latest version of add-on."""
         return self.data[ATTR_VERSION]
 
     @property
-    def version(self) -> Optional[str]:
+    def version(self) -> AwesomeVersion:
         """Return version of add-on."""
         return self.data[ATTR_VERSION]
 
@@ -342,7 +342,7 @@ class AddonModel(CoreSysAttributes, ABC):
     @property
     def access_openpeerpower_api(self) -> bool:
         """Return True if the add-on access to Open Peer Power API proxy."""
-        return self.data[ATTR_HOMEASSISTANT_API]
+        return self.data[ATTR_OPENPEERPOWER_API]
 
     @property
     def oppio_role(self) -> str:
@@ -427,7 +427,7 @@ class AddonModel(CoreSysAttributes, ABC):
     @property
     def openpeerpower_version(self) -> Optional[str]:
         """Return min Open Peer Power version they needed by Add-on."""
-        return self.data.get(ATTR_HOMEASSISTANT)
+        return self.data.get(ATTR_OPENPEERPOWER)
 
     @property
     def url(self) -> Optional[str]:
@@ -554,15 +554,10 @@ class AddonModel(CoreSysAttributes, ABC):
             return False
 
         # Open Peer Power
-        version = config.get(ATTR_HOMEASSISTANT)
-        if version is None or self.sys_openpeerpower.version is None:
-            return True
-
+        version: Optional[AwesomeVersion] = config.get(ATTR_OPENPEERPOWER)
         try:
-            return pkg_version.parse(
-                self.sys_openpeerpower.version
-            ) >= pkg_version.parse(version)
-        except pkg_version.InvalidVersion:
+            return self.sys_openpeerpower.version >= version
+        except (AwesomeVersionException, TypeError):
             return True
 
     def _image(self, config) -> str:

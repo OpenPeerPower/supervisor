@@ -10,17 +10,19 @@ import time
 from typing import Awaitable, Optional
 
 import attr
-from packaging import version as pkg_version
+from awesomeversion import AwesomeVersion, AwesomeVersionException
 
 from ..coresys import CoreSys, CoreSysAttributes
-from ..docker.openpeerpower import DockerHomeAssistant
+from ..docker.openpeerpower import DockerOpenPeerPower
 from ..docker.stats import DockerStats
 from ..exceptions import (
     DockerError,
-    HomeAssistantCrashError,
-    HomeAssistantError,
-    HomeAssistantUpdateError,
+    OpenPeerPowerCrashError,
+    OpenPeerPowerError,
+    OpenPeerPowerJobError,
+    OpenPeerPowerUpdateError,
 )
+from ..jobs.decorator import Job, JobCondition
 from ..resolution.const import ContextType, IssueType
 from ..utils import convert_to_ascii, process_lock
 
@@ -28,7 +30,7 @@ _LOGGER: logging.Logger = logging.getLogger(__name__)
 
 RE_YAML_ERROR = re.compile(r"openpeerpower\.util\.yaml")
 
-LANDINGPAGE: str = "landingpage"
+LANDINGPAGE: AwesomeVersion = AwesomeVersion("landingpage")
 
 
 @attr.s(frozen=True)
@@ -39,13 +41,13 @@ class ConfigResult:
     log = attr.ib()
 
 
-class HomeAssistantCore(CoreSysAttributes):
+class OpenPeerPowerCore(CoreSysAttributes):
     """Open Peer Power core object for handle it."""
 
     def __init__(self, coresys: CoreSys):
         """Initialize Open Peer Power object."""
         self.coresys: CoreSys = coresys
-        self.instance: DockerHomeAssistant = DockerHomeAssistant(coresys)
+        self.instance: DockerOpenPeerPower = DockerOpenPeerPower(coresys)
         self.lock: asyncio.Lock = asyncio.Lock()
         self._error_state: bool = False
 
@@ -78,9 +80,9 @@ class HomeAssistantCore(CoreSysAttributes):
         if self.instance.version != LANDINGPAGE:
             return
 
-        _LOGGER.info("Starting HomeAssistant landingpage")
+        _LOGGER.info("Starting OpenPeerPower landingpage")
         if not await self.instance.is_running():
-            with suppress(HomeAssistantError):
+            with suppress(OpenPeerPowerError):
                 await self._start()
 
     @process_lock
@@ -120,11 +122,11 @@ class HomeAssistantCore(CoreSysAttributes):
             if not self.sys_openpeerpower.latest_version:
                 await self.sys_updater.reload()
 
-            tag = self.sys_openpeerpower.latest_version
-            if tag:
+            if self.sys_openpeerpower.latest_version:
                 try:
                     await self.instance.update(
-                        tag, image=self.sys_updater.image_openpeerpower
+                        self.sys_openpeerpower.latest_version,
+                        image=self.sys_updater.image_openpeerpower,
                     )
                     break
                 except DockerError:
@@ -144,7 +146,7 @@ class HomeAssistantCore(CoreSysAttributes):
         try:
             _LOGGER.info("Starting Open Peer Power")
             await self._start()
-        except HomeAssistantError:
+        except OpenPeerPowerError:
             _LOGGER.error("Can't start Open Peer Power!")
 
         # Cleanup
@@ -152,8 +154,16 @@ class HomeAssistantCore(CoreSysAttributes):
             await self.instance.cleanup()
 
     @process_lock
-    async def update(self, version: Optional[str] = None) -> None:
-        """Update HomeAssistant version."""
+    @Job(
+        conditions=[
+            JobCondition.FREE_SPACE,
+            JobCondition.HEALTHY,
+            JobCondition.INTERNET_HOST,
+        ],
+        on_condition=OpenPeerPowerJobError,
+    )
+    async def update(self, version: Optional[AwesomeVersion] = None) -> None:
+        """Update OpenPeerPower version."""
         version = version or self.sys_openpeerpower.latest_version
         old_image = self.sys_openpeerpower.image
         rollback = self.sys_openpeerpower.version if not self.error_state else None
@@ -165,7 +175,7 @@ class HomeAssistantCore(CoreSysAttributes):
             return
 
         # process an update
-        async def _update(to_version: str) -> None:
+        async def _update(to_version: AwesomeVersion) -> None:
             """Run Open Peer Power update."""
             _LOGGER.info("Updating Open Peer Power to version %s", to_version)
             try:
@@ -174,7 +184,7 @@ class HomeAssistantCore(CoreSysAttributes):
                 )
             except DockerError as err:
                 _LOGGER.warning("Updating Open Peer Power image failed")
-                raise HomeAssistantUpdateError() from err
+                raise OpenPeerPowerUpdateError() from err
             else:
                 self.sys_openpeerpower.version = self.instance.version
                 self.sys_openpeerpower.image = self.sys_updater.image_openpeerpower
@@ -189,32 +199,32 @@ class HomeAssistantCore(CoreSysAttributes):
                 await self.instance.cleanup(old_image=old_image)
 
         # Update Open Peer Power
-        with suppress(HomeAssistantError):
+        with suppress(OpenPeerPowerError):
             await _update(version)
             return
 
         # Update going wrong, revert it
         if self.error_state and rollback:
-            _LOGGER.critical("HomeAssistant update failed -> rollback!")
+            _LOGGER.critical("OpenPeerPower update failed -> rollback!")
             self.sys_resolution.create_issue(
                 IssueType.UPDATE_ROLLBACK, ContextType.CORE
             )
 
             # Make a copy of the current log file if it exsist
-            logfile = self.sys_config.path_openpeerpower / "openpeerpower.log"
+            logfile = self.sys_config.path_openpeerpower / "open-peer-power.log"
             if logfile.exists():
                 backup = (
-                    self.sys_config.path_openpeerpower / "openpeerpower-rollback.log"
+                    self.sys_config.path_openpeerpower / "open-peer-power-rollback.log"
                 )
 
                 shutil.copy(logfile, backup)
                 _LOGGER.info(
-                    "A backup of the logfile is stored in /config/openpeerpower-rollback.log"
+                    "A backup of the logfile is stored in /config/open-peer-power-rollback.log"
                 )
             await _update(rollback)
         else:
             self.sys_resolution.create_issue(IssueType.UPDATE_FAILED, ContextType.CORE)
-            raise HomeAssistantUpdateError()
+            raise OpenPeerPowerUpdateError()
 
     async def _start(self) -> None:
         """Start Open Peer Power Docker & wait."""
@@ -228,7 +238,7 @@ class HomeAssistantCore(CoreSysAttributes):
         try:
             await self.instance.run()
         except DockerError as err:
-            raise HomeAssistantError() from err
+            raise OpenPeerPowerError() from err
 
         await self._block_till_run(self.sys_openpeerpower.version)
 
@@ -244,7 +254,7 @@ class HomeAssistantCore(CoreSysAttributes):
             try:
                 await self.instance.start()
             except DockerError as err:
-                raise HomeAssistantError() from err
+                raise OpenPeerPowerError() from err
 
             await self._block_till_run(self.sys_openpeerpower.version)
         # No Instance/Container found, extended start
@@ -260,7 +270,7 @@ class HomeAssistantCore(CoreSysAttributes):
         try:
             return await self.instance.stop(remove_container=False)
         except DockerError as err:
-            raise HomeAssistantError() from err
+            raise OpenPeerPowerError() from err
 
     @process_lock
     async def restart(self) -> None:
@@ -268,7 +278,7 @@ class HomeAssistantCore(CoreSysAttributes):
         try:
             await self.instance.restart()
         except DockerError as err:
-            raise HomeAssistantError() from err
+            raise OpenPeerPowerError() from err
 
         await self._block_till_run(self.sys_openpeerpower.version)
 
@@ -280,7 +290,7 @@ class HomeAssistantCore(CoreSysAttributes):
         await self._start()
 
     def logs(self) -> Awaitable[bytes]:
-        """Get HomeAssistant docker logs.
+        """Get OpenPeerPower docker logs.
 
         Return a coroutine.
         """
@@ -294,7 +304,7 @@ class HomeAssistantCore(CoreSysAttributes):
         try:
             return await self.instance.stats()
         except DockerError as err:
-            raise HomeAssistantError() from err
+            raise OpenPeerPowerError() from err
 
     def is_running(self) -> Awaitable[bool]:
         """Return True if Docker container is running.
@@ -324,7 +334,7 @@ class HomeAssistantCore(CoreSysAttributes):
         # If not valid
         if result.exit_code is None:
             _LOGGER.error("Fatal error on config check!")
-            raise HomeAssistantError()
+            raise OpenPeerPowerError()
 
         # Convert output
         log = convert_to_ascii(result.output)
@@ -338,7 +348,7 @@ class HomeAssistantCore(CoreSysAttributes):
         _LOGGER.info("Open Peer Power config is valid")
         return ConfigResult(True, log)
 
-    async def _block_till_run(self, version: str) -> None:
+    async def _block_till_run(self, version: AwesomeVersion) -> None:
         """Block until Open-Peer-Power is booting up or startup timeout."""
         # Skip landingpage
         if version == LANDINGPAGE:
@@ -348,9 +358,9 @@ class HomeAssistantCore(CoreSysAttributes):
         # Manage timeouts
         timeout: bool = True
         start_time = time.monotonic()
-        with suppress(pkg_version.InvalidVersion):
+        with suppress(AwesomeVersionException):
             # Version provide early stage UI
-            if pkg_version.parse(version) >= pkg_version.parse("0.112.0"):
+            if version >= AwesomeVersion("0.112.0"):
                 _LOGGER.debug("Disable startup timeouts - early UI")
                 timeout = False
 
@@ -407,8 +417,14 @@ class HomeAssistantCore(CoreSysAttributes):
                 break
 
         self._error_state = True
-        raise HomeAssistantCrashError()
+        raise OpenPeerPowerCrashError()
 
+    @Job(
+        conditions=[
+            JobCondition.FREE_SPACE,
+            JobCondition.INTERNET_HOST,
+        ]
+    )
     async def repair(self):
         """Repair local Open Peer Power data."""
         if await self.instance.exists():

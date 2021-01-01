@@ -1,6 +1,6 @@
 """Open Peer Power dns plugin.
 
-Code: https://github.com/openpeerpower/plugin-dns
+Code: https://github.com/open-peer-power/plugin-dns
 """
 import asyncio
 from contextlib import suppress
@@ -10,18 +10,19 @@ from pathlib import Path
 from typing import Awaitable, List, Optional
 
 import attr
+from awesomeversion import AwesomeVersion
 import jinja2
-from packaging.version import parse as pkg_parse
 import voluptuous as vol
 
-from ..const import ATTR_IMAGE, ATTR_SERVERS, ATTR_VERSION, DNS_SUFFIX, LogLevel
-from ..coresys import CoreSys, CoreSysAttributes
+from ..const import ATTR_SERVERS, DNS_SUFFIX, LogLevel
+from ..coresys import CoreSys
 from ..docker.dns import DockerDNS
 from ..docker.stats import DockerStats
 from ..exceptions import CoreDNSError, CoreDNSUpdateError, DockerError, JsonFileError
 from ..resolution.const import ContextType, IssueType, SuggestionType
-from ..utils.json import JsonConfig, write_json_file
+from ..utils.json import write_json_file
 from ..validate import dns_url
+from .base import PluginBase
 from .const import FILE_OPPIO_DNS
 from .validate import SCHEMA_DNS_CONFIG
 
@@ -40,14 +41,13 @@ class HostEntry:
     names: List[str] = attr.ib()
 
 
-class CoreDNS(JsonConfig, CoreSysAttributes):
+class PluginDns(PluginBase):
     """Open Peer Power core object for handle it."""
-
-    slug: str = "dns"
 
     def __init__(self, coresys: CoreSys):
         """Initialize opp object."""
         super().__init__(FILE_OPPIO_DNS, SCHEMA_DNS_CONFIG)
+        self.slug = "dns"
         self.coresys: CoreSys = coresys
         self.instance: DockerDNS = DockerDNS(coresys)
         self.resolv_template: Optional[jinja2.Template] = None
@@ -70,12 +70,11 @@ class CoreDNS(JsonConfig, CoreSysAttributes):
     def locals(self) -> List[str]:
         """Return list of local system DNS servers."""
         servers: List[str] = []
-        for server in self.sys_host.network.dns_servers:
-            if server in servers:
-                continue
+        for server in [
+            f"dns://{server!s}" for server in self.sys_host.network.dns_servers
+        ]:
             with suppress(vol.Invalid):
-                dns_url(server)
-                servers.append(server)
+                servers.append(dns_url(server))
 
         return servers
 
@@ -90,29 +89,7 @@ class CoreDNS(JsonConfig, CoreSysAttributes):
         self._data[ATTR_SERVERS] = value
 
     @property
-    def version(self) -> Optional[str]:
-        """Return current version of DNS."""
-        return self._data.get(ATTR_VERSION)
-
-    @version.setter
-    def version(self, value: str) -> None:
-        """Return current version of DNS."""
-        self._data[ATTR_VERSION] = value
-
-    @property
-    def image(self) -> str:
-        """Return current image of DNS."""
-        if self._data.get(ATTR_IMAGE):
-            return self._data[ATTR_IMAGE]
-        return f"openpeerpower/{self.sys_arch.supervisor}-oppio-dns"
-
-    @image.setter
-    def image(self, value: str) -> None:
-        """Return current image of DNS."""
-        self._data[ATTR_IMAGE] = value
-
-    @property
-    def latest_version(self) -> Optional[str]:
+    def latest_version(self) -> Optional[AwesomeVersion]:
         """Return latest version of CoreDNS."""
         return self.sys_updater.version_dns
 
@@ -120,14 +97,6 @@ class CoreDNS(JsonConfig, CoreSysAttributes):
     def in_progress(self) -> bool:
         """Return True if a task is in progress."""
         return self.instance.in_progress
-
-    @property
-    def need_update(self) -> bool:
-        """Return True if an update is available."""
-        try:
-            return pkg_parse(self.version) < pkg_parse(self.latest_version)
-        except (TypeError, ValueError):
-            return True
 
     async def load(self) -> None:
         """Load DNS setup."""
@@ -148,7 +117,7 @@ class CoreDNS(JsonConfig, CoreSysAttributes):
             if not self.version:
                 self.version = await self.instance.get_latest_version()
 
-            await self.instance.attach(tag=self.version)
+            await self.instance.attach(version=self.version)
         except DockerError:
             _LOGGER.info(
                 "No CoreDNS plugin Docker image %s found.", self.instance.image
@@ -195,7 +164,7 @@ class CoreDNS(JsonConfig, CoreSysAttributes):
         # Init Hosts
         self.write_hosts()
 
-    async def update(self, version: Optional[str] = None) -> None:
+    async def update(self, version: Optional[AwesomeVersion] = None) -> None:
         """Update CoreDNS plugin."""
         version = version or self.latest_version
         old_image = self.image
@@ -330,7 +299,7 @@ class CoreDNS(JsonConfig, CoreSysAttributes):
         )
         self.add_host(
             self.sys_docker.network.gateway,
-            ["openpeerpower", "openpeerpower"],
+            ["openpeerpower", "open-peer-power"],
             write=False,
         )
         self.add_host(self.sys_docker.network.dns, ["dns"], write=False)
@@ -375,10 +344,7 @@ class CoreDNS(JsonConfig, CoreSysAttributes):
     def delete_host(self, host: str, write: bool = True) -> None:
         """Remove a entry from hosts."""
         entry = self._search_host([host])
-
-        # No match on hosts
         if not entry:
-            _LOGGER.debug("Can't remove Host entry: %s", host)
             return
 
         _LOGGER.debug("Removing host entry %s - %s", entry.ip_address, entry.names)

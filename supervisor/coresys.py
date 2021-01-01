@@ -22,19 +22,20 @@ if TYPE_CHECKING:
     from .dbus import DBusManager
     from .discovery import Discovery
     from .oppos import OppOS
-    from .misc.scheduler import Scheduler
-    from .misc.hwmon import HwMonitor
-    from .misc.tasks import Tasks
-    from .openpeerpower import HomeAssistant
+    from .openpeerpower import OpenPeerPower
     from .host import HostManager
     from .ingress import Ingress
+    from .jobs import JobManager
+    from .misc.hwmon import HwMonitor
+    from .misc.scheduler import Scheduler
+    from .misc.tasks import Tasks
+    from .plugins import PluginManager
+    from .resolution.module import ResolutionManager
     from .services import ServiceManager
     from .snapshots import SnapshotManager
-    from .supervisor import Supervisor
     from .store import StoreManager
+    from .supervisor import Supervisor
     from .updater import Updater
-    from .plugins import PluginManager
-    from .resolution import ResolutionManager
 
 
 T = TypeVar("T")
@@ -65,7 +66,7 @@ class CoreSys:
         self._core: Optional[Core] = None
         self._arch: Optional[CpuArch] = None
         self._auth: Optional[Auth] = None
-        self._openpeerpower: Optional[HomeAssistant] = None
+        self._openpeerpower: Optional[OpenPeerPower] = None
         self._supervisor: Optional[Supervisor] = None
         self._addons: Optional[AddonManager] = None
         self._api: Optional[RestAPI] = None
@@ -83,6 +84,7 @@ class CoreSys:
         self._hwmonitor: Optional[HwMonitor] = None
         self._plugins: Optional[PluginManager] = None
         self._resolution: Optional[ResolutionManager] = None
+        self._jobs: Optional[JobManager] = None
 
     @property
     def dev(self) -> bool:
@@ -190,15 +192,15 @@ class CoreSys:
         self._auth = value
 
     @property
-    def openpeerpower(self) -> HomeAssistant:
+    def openpeerpower(self) -> OpenPeerPower:
         """Return Open Peer Power object."""
         if self._openpeerpower is None:
             raise RuntimeError("Open Peer Power not set!")
         return self._openpeerpower
 
     @openpeerpower.setter
-    def openpeerpower(self, value: HomeAssistant) -> None:
-        """Set a HomeAssistant object."""
+    def openpeerpower(self, value: OpenPeerPower) -> None:
+        """Set a OpenPeerPower object."""
         if self._openpeerpower:
             raise RuntimeError("Open Peer Power already set!")
         self._openpeerpower = value
@@ -414,6 +416,20 @@ class CoreSys:
         self._resolution = value
 
     @property
+    def jobs(self) -> JobManager:
+        """Return resolution manager object."""
+        if self._jobs is None:
+            raise RuntimeError("job manager not set!")
+        return self._jobs
+
+    @jobs.setter
+    def jobs(self, value: JobManager) -> None:
+        """Set a resolution manager object."""
+        if self._jobs:
+            raise RuntimeError("job manager already set!")
+        self._jobs = value
+
+    @property
     def machine(self) -> Optional[str]:
         """Return machine type string."""
         return self._machine
@@ -509,7 +525,7 @@ class CoreSysAttributes:
         return self.coresys.auth
 
     @property
-    def sys_openpeerpower(self) -> HomeAssistant:
+    def sys_openpeerpower(self) -> OpenPeerPower:
         """Return Open Peer Power object."""
         return self.coresys.openpeerpower
 
@@ -587,6 +603,11 @@ class CoreSysAttributes:
     def sys_resolution(self) -> ResolutionManager:
         """Return Resolution manager object."""
         return self.coresys.resolution
+
+    @property
+    def sys_jobs(self) -> JobManager:
+        """Return Job manager object."""
+        return self.coresys.jobs
 
     def sys_run_in_executor(
         self, funct: Callable[..., T], *args: Any
