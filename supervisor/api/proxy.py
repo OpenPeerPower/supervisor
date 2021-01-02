@@ -199,7 +199,7 @@ class APIProxy(CoreSysAttributes):
             _LOGGER.error("Can't initialize handshake: %s", err)
             return server
 
-        # init connection to hass
+        # init connection to opp
         try:
             client = await self._websocket_client()
         except APIError:
