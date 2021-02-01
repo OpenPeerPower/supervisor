@@ -171,7 +171,7 @@ class DockerInterface(CoreSysAttributes):
                 )
                 _LOGGER.info(
                     "Your IP address has made too many requests to Docker Hub which activated a rate limit. "
-                    "For more details see https://www.open-peer-power.io/more-info/dockerhub-rate-limit"
+                    "For more details see https://www.openpeerpower.io/more-info/dockerhub-rate-limit"
                 )
             raise DockerError() from err
         except (docker.errors.DockerException, requests.RequestException) as err:

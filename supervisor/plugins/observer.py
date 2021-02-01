@@ -1,6 +1,6 @@
 """Open Peer Power observer plugin.
 
-Code: https://github.com/open-peer-power/plugin-observer
+Code: https://github.com/openpeerpower/plugin-observer
 """
 import asyncio
 from contextlib import suppress

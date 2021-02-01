@@ -189,7 +189,7 @@ class Supervisor(CoreSysAttributes):
         timeout = aiohttp.ClientTimeout(total=10)
         try:
             await self.sys_websession.head(
-                "https://version.open-peer-power.io/online.txt", timeout=timeout
+                "https://version.openpeerpower.io/online.txt", timeout=timeout
             )
         except (ClientError, asyncio.TimeoutError):
             self._connectivity = False

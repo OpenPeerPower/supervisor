@@ -1,6 +1,6 @@
 """Open Peer Power audio plugin.
 
-Code: https://github.com/open-peer-power/plugin-audio
+Code: https://github.com/openpeerpower/plugin-audio
 """
 import asyncio
 from contextlib import suppress

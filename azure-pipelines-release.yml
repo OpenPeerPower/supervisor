@@ -1,4 +1,4 @@
-# https://dev.azure.com/open-peer-power
+# https://dev.azure.com/openpeerpower
 
 trigger:
   batch: true
@@ -27,7 +27,7 @@ resources:
     - repository: azure
       type: github
       name: "openpeerpower/ci-azure"
-      endpoint: "open-peer-power"
+      endpoint: "openpeerpower"
 
 stages:
 

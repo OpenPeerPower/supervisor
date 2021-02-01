@@ -1,5 +1,5 @@
 /*! For license information please see chunk.897458ecb98dd6f360b5.js.LICENSE.txt */
-(self.webpackChunkopen-peer-power_frontend=self.webpackChunkopen-peer-power_frontend||[]).push([[509],{7087:(t,e,i)=>{"use strict";i(1309),i(5660);var n=i(6110),r=i(8235),a=i(7139),o=i(8149),s=i(856);(0,a.k)({_template:s.d`
+(self.webpackChunkopenpeerpower_frontend=self.webpackChunkopenpeerpower_frontend||[]).push([[509],{7087:(t,e,i)=>{"use strict";i(1309),i(5660);var n=i(6110),r=i(8235),a=i(7139),o=i(8149),s=i(856);(0,a.k)({_template:s.d`
     <style>
       :host {
         display: inline-block;
